@@ -1,0 +1,61 @@
+schema = "md-editor-theme/1.1"
+id = "restrained-monochrome"
+name = "01 · Restrained Monochrome"
+description = "Quiet drafting paper: graphite rails, micro-grid and white typography."
+seed = 31
+seed_mode = "fixed"
+fps = 12
+
+[palette]
+paper = "#101213"
+ink = "#e2e5e7"
+muted = "#838b90"
+frame = "#737f86"
+accent = "#ffffff"
+code = "#ccd4d8"
+link = "#ffffff"
+
+[geometry]
+outer = [0, 0, 0, 0]
+border = 0
+divider = 0
+spacer = 0
+
+[styles.draft]
+fg = "#293035"
+bg = "paper"
+[styles.rail]
+fg = "#58626a"
+bg = "paper"
+
+[patterns.micro]
+kind = "grid"
+glyphs = ["·", " ", "+"]
+period = [12, 4]
+style = "draft"
+[patterns.rails]
+kind = "rails"
+glyphs = ["─"]
+period = [12, 4]
+style = "rail"
+
+[[layers]]
+id = "drafting-grid"
+slot = "outer"
+pattern = "micro"
+mode = "transparent-cell"
+[[layers]]
+id = "perimeter-rails"
+slot = "outer"
+pattern = "rails"
+mode = "underlay"
+
+[fallbacks.ascii]
+glyph = "."
+[fallbacks.monochrome]
+glyph = "."
+[fallbacks.narrow]
+glyph = "."
+hide_layers = ["perimeter-rails"]
+[fallbacks.reduced_motion]
+glyph = "."

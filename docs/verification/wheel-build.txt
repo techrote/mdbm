@@ -1,0 +1,10 @@
+WARNING: The directory '/home/oai/.cache/pip' or its parent directory is not owned or is not writable by the current user. The cache has been disabled. Check the permissions and owner of that directory. If executing pip with sudo, you should use sudo's -H flag.
+Processing /mnt/data/mdbm_work/MDBM-1.0.0a2
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: mdbm-workspace
+  Building wheel for mdbm-workspace (pyproject.toml): started
+  Building wheel for mdbm-workspace (pyproject.toml): finished with status 'done'
+  Created wheel for mdbm-workspace: filename=mdbm_workspace-1.0.0a2-py3-none-any.whl size=122612 sha256=4cef27782f78a9cb8f46780d9767ca2143df7391c5ad9def86b45e1e5832c382
+  Stored in directory: /tmp/pip-ephem-wheel-cache-epg12j1n/wheels/b3/73/32/bef30fd27177ca0ace2c3d187046d8d3347c528371904457b7
+Successfully built mdbm-workspace

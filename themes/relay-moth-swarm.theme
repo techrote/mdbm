@@ -1,0 +1,192 @@
+schema = "md-editor-theme/1.1"
+id = "relay-moth-swarm"
+name = "05 · Relay Moth Swarm"
+description = "Sparse animated relay-moth constellations: fluttering glyph frames, orbital drift, ribbons and pulsing signal density."
+seed = 5514
+seed_mode = "session"
+fps = 12
+
+[palette]
+paper = "#0e111a"
+ink = "#e9e5cf"
+muted = "#857f77"
+frame = "#514b5f"
+accent = "#dccb7d"
+code = "#b9d6c2"
+link = "#93c9d3"
+moth = "#f0df9e"
+wing = "#caa9df"
+trace = "#625777"
+signal = "#83cbb3"
+
+[ramps.moth]
+colours = ["#7c6b92", "#d0a9dc", "#f1dea1", "#8bd3ba"]
+steps = 16
+
+[geometry]
+outer = [1, 1, 1, 1]
+border = 1
+divider = 0
+spacer = 0
+
+[styles.moth]
+fg = "moth"
+bg = "paper"
+bold = true
+[styles.wing]
+fg = "wing"
+bg = "paper"
+[styles.trace]
+fg = "trace"
+bg = "paper"
+[styles.signal]
+fg = "signal"
+bg = "paper"
+
+[patterns.orbit]
+kind = "scatter"
+glyphs = [".", "^", "'", "v", "*", "+"]
+period = [11, 5]
+density = 0.085
+style = "moth"
+[patterns.ribbon]
+kind = "stepped-path"
+glyphs = ["·", "~", "-"]
+period = [13, 5]
+density = 0.5
+style = "trace"
+[patterns.signal]
+kind = "scatter"
+glyphs = ["·", "+", "*"]
+period = [17, 7]
+density = 0.025
+style = "signal"
+[patterns.lattice]
+kind = "grid"
+glyphs = ["·", "+"]
+period = [17, 5]
+density = 0.35
+style = "trace"
+
+[[layers]]
+id = "moth-orbit"
+slot = "outer"
+pattern = "orbit"
+mode = "transparent-cell"
+[[layers]]
+id = "moth-ribbon"
+slot = "outer"
+pattern = "ribbon"
+mode = "underlay"
+opacity = 0.65
+[[layers]]
+id = "signal-points"
+slot = "outer"
+pattern = "signal"
+mode = "transparent-cell"
+[[layers]]
+id = "edit-lattice"
+slot = "tile.edit.chrome"
+pattern = "lattice"
+mode = "transparent-cell"
+[[layers]]
+id = "view-lattice"
+slot = "tile.view.chrome"
+pattern = "lattice"
+mode = "transparent-cell"
+[[layers]]
+id = "immersive-moths"
+slot = "behind-content"
+pattern = "orbit"
+mode = "underlay"
+opacity = 0.25
+
+[[rules]]
+target = "layer.moth-orbit"
+cue = "focus-change"
+set = { density = 0.16, style = "signal" }
+[[rules]]
+target = "layer.signal-points"
+cue = "save-success"
+set = { density = 0.12, style = "moth" }
+
+[[animations]]
+id = "wing-cycle"
+target = "layer.moth-orbit"
+property = "glyph_frame"
+values = [0,1,2,3,4,5,1,3,0,4]
+duration = 1.2
+loop = true
+[[animations]]
+id = "orbit-drift"
+target = "layer.moth-orbit"
+property = "offset"
+values = [[0,0],[1,0],[2,1],[3,1],[4,0],[3,-1],[2,-1],[1,-2],[0,-2],[-1,-1],[-2,0],[-1,1]]
+duration = 4.8
+loop = true
+[[animations]]
+id = "orbit-breathe"
+target = "layer.moth-orbit"
+property = "density"
+values = [0.055,0.07,0.09,0.11,0.09,0.07]
+duration = 5.0
+loop = true
+[[animations]]
+id = "ribbon-wave"
+target = "layer.moth-ribbon"
+property = "pattern_phase"
+values = [0,1,2,3,4,5,6,7,8,9,10,11]
+duration = 4.2
+loop = true
+[[animations]]
+id = "signal-twinkle"
+target = "layer.signal-points"
+property = "glyph_frame"
+values = [0,0,1,0,2,0]
+duration = 3.0
+loop = true
+[[animations]]
+id = "signal-colour"
+target = "layer.signal-points"
+property = "palette_phase"
+values = [0,3,6,9,12,15,12,9,6,3]
+duration = 8.0
+loop = true
+[[animations]]
+id = "edit-lattice-shift"
+target = "layer.edit-lattice"
+property = "pattern_phase"
+values = [0,1,2,3,4]
+duration = 5.0
+loop = true
+[[animations]]
+id = "view-lattice-shift"
+target = "layer.view-lattice"
+property = "pattern_phase"
+values = [4,3,2,1,0]
+duration = 5.0
+loop = true
+[[animations]]
+id = "immersive-drift"
+target = "layer.immersive-moths"
+property = "offset"
+values = [[0,0],[2,0],[4,1],[6,0],[4,-1],[2,-1],[0,0],[-2,1],[-4,0],[-2,-1]]
+duration = 7.0
+loop = true
+
+[[variants]]
+when = { max_width = 72 }
+hide_layers = ["moth-ribbon", "signal-points"]
+
+[fallbacks.ascii]
+glyph = "."
+hide_layers = ["immersive-moths"]
+[fallbacks.monochrome]
+glyph = "."
+hide_layers = ["signal-points", "immersive-moths"]
+[fallbacks.narrow]
+glyph = "."
+hide_layers = ["moth-ribbon", "signal-points", "immersive-moths"]
+[fallbacks.reduced_motion]
+glyph = "."
+hide_layers = ["moth-ribbon", "signal-points", "immersive-moths"]

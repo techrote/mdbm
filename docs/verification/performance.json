@@ -1,0 +1,71 @@
+{
+  "schema": "mdbm-performance/1.0",
+  "python": "3.13.5",
+  "platform": "Linux-6.18.35-x86_64-with-glibc2.41",
+  "logical_cpus": 5,
+  "dependencies": {
+    "prompt-toolkit": "3.0.52",
+    "markdown-it-py": "4.2.0",
+    "mdit-py-plugins": "MISSING",
+    "Pygments": "2.20.0",
+    "wcwidth": "0.7.0",
+    "regex": "2026.5.9",
+    "Send2Trash": "2.1.0"
+  },
+  "method": "160x50 owned-cell composition, fixed seed, normal motion, 5 warm-ups + 60 measured frames. No physical terminal, input transport or parser scheduling latency is included.",
+  "composition": {
+    "minimal": {
+      "samples": 60,
+      "p50_ms": 11.877,
+      "p95_ms": 16.971,
+      "max_ms": 92.715,
+      "unchanged_frame_damage": 0,
+      "single_insert_frame_ms": 12.177,
+      "single_insert_changed_cells": 18
+    },
+    "restrained-monochrome": {
+      "samples": 60,
+      "p50_ms": 17.075,
+      "p95_ms": 20.22,
+      "max_ms": 87.47,
+      "unchanged_frame_damage": 0,
+      "single_insert_frame_ms": 16.642,
+      "single_insert_changed_cells": 18
+    },
+    "neon-circuitry": {
+      "samples": 60,
+      "p50_ms": 20.669,
+      "p95_ms": 22.231,
+      "max_ms": 90.678,
+      "unchanged_frame_damage": 0,
+      "single_insert_frame_ms": 20.336,
+      "single_insert_changed_cells": 157
+    },
+    "dense-glitch-mosaic": {
+      "samples": 60,
+      "p50_ms": 29.618,
+      "p95_ms": 33.996,
+      "max_ms": 95.533,
+      "unchanged_frame_damage": 0,
+      "single_insert_frame_ms": 29.597,
+      "single_insert_changed_cells": 18
+    }
+  },
+  "large_document": {
+    "source_lines": 100000,
+    "indexed_lines": 100001,
+    "utf8_bytes": 3600000,
+    "line_index_bytes": 400004,
+    "construct_ms": 34.855,
+    "edit_ms": [
+      5.864,
+      3.726,
+      0.426
+    ],
+    "parse_and_layout_ms": 22243.429,
+    "preview_rows": 36364,
+    "process_peak_rss_mib": 189.707,
+    "undo_steps_retained": 0,
+    "limitation": "One isolated POSIX process. Peak RSS includes interpreter and dependencies; this is not incremental parsing or an adversarial document bound."
+  }
+}

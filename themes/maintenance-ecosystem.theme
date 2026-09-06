@@ -1,0 +1,296 @@
+schema = "md-editor-theme/1.1"
+id = "maintenance-ecosystem"
+name = "04 · Maintenance Ecosystem"
+description = "Animated lunar-service bay: pulse lamps, relay moths, cable crawlers, coolant drift and diagnostic arcs, adapted into MDBM's bounded data-only compositor."
+seed = 4202
+seed_mode = "session"
+fps = 12
+
+[palette]
+paper = "#071017"
+ink = "#d7e1df"
+muted = "#718184"
+frame = "#34484b"
+accent = "#78d9c0"
+code = "#d9bd82"
+link = "#82c7e8"
+service = "#6b8182"
+rail = "#3b5458"
+lamp = "#9ed885"
+moth = "#e4d79b"
+crawler = "#69c7b0"
+coolant = "#87bff0"
+arc = "#e0e9ff"
+aurora = "#8a78ce"
+
+[ramps.aurora]
+colours = ["#35536a", "#5b71b8", "#8e69cb", "#64d4c4", "#d6c77b"]
+steps = 20
+
+[geometry]
+outer = [1, 1, 1, 1]
+border = 1
+divider = 1
+spacer = 0
+
+[styles.service]
+fg = "service"
+bg = "paper"
+[styles.rail]
+fg = "rail"
+bg = "paper"
+[styles.lamp]
+fg = "lamp"
+bg = "paper"
+bold = true
+[styles.moth]
+fg = "moth"
+bg = "paper"
+[styles.crawler]
+fg = "crawler"
+bg = "paper"
+bold = true
+[styles.coolant]
+fg = "coolant"
+bg = "paper"
+[styles.arc]
+fg = "arc"
+bg = "paper"
+bold = true
+[styles.aurora]
+fg = "aurora"
+bg = "paper"
+[styles.hatch]
+fg = "accent"
+bg = "paper"
+bold = true
+
+[art.module]
+rows = ["[==] AUX", "  │ BAY", "──┴─────"]
+style = "service"
+[motifs.module]
+art = "module"
+gap = [18, 2]
+
+[art.crawler]
+rows = ["@==~"]
+style = "crawler"
+[motifs.crawler]
+art = "crawler"
+gap = [20, 0]
+
+[patterns.service-grid]
+kind = "ladders"
+glyphs = ["│", "─", "+"]
+period = [15, 4]
+style = "rail"
+[patterns.signal-lamps]
+kind = "scatter"
+glyphs = ["o", "O", "*", "o"]
+period = [11, 4]
+density = 0.045
+style = "lamp"
+[patterns.relay-moths]
+kind = "scatter"
+glyphs = [".", "^", "'", "v", "*", "+"]
+period = [9, 4]
+density = 0.07
+style = "moth"
+[patterns.coolant]
+kind = "scatter"
+glyphs = [".", "o", "O", "*"]
+period = [13, 5]
+density = 0.035
+style = "coolant"
+[patterns.aurora]
+kind = "bands"
+glyphs = [".", "~", "=", "*", "+"]
+period = [23, 2]
+density = 0.55
+style = "aurora"
+[patterns.arc]
+kind = "slice-displacement"
+glyphs = [".", "*", "+", "~", "#"]
+period = [9, 2]
+density = 0.7
+amplitude = 6
+style = "arc"
+
+[[layers]]
+id = "service-grid"
+slot = "outer"
+pattern = "service-grid"
+mode = "transparent-cell"
+[[layers]]
+id = "service-modules"
+slot = "outer"
+motif = "module"
+mode = "transparent-cell"
+[[layers]]
+id = "signal-lamps"
+slot = "outer"
+pattern = "signal-lamps"
+mode = "transparent-cell"
+[[layers]]
+id = "relay-moths"
+slot = "outer"
+pattern = "relay-moths"
+mode = "transparent-cell"
+[[layers]]
+id = "coolant-rain"
+slot = "outer"
+pattern = "coolant"
+mode = "transparent-cell"
+[[layers]]
+id = "edit-crawler"
+slot = "tile.edit.chrome"
+motif = "crawler"
+mode = "transparent-cell"
+[[layers]]
+id = "view-crawler"
+slot = "tile.view.chrome"
+motif = "crawler"
+mode = "transparent-cell"
+[[layers]]
+id = "tree-rails"
+slot = "tile.filesystem.chrome"
+pattern = "service-grid"
+mode = "transparent-cell"
+[[layers]]
+id = "contents-rails"
+slot = "tile.contents.chrome"
+pattern = "service-grid"
+mode = "transparent-cell"
+[[layers]]
+id = "diagnostic-aurora"
+slot = "behind-content"
+pattern = "aurora"
+mode = "underlay"
+opacity = 0.45
+[[layers]]
+id = "save-arc"
+slot = "divider"
+pattern = "arc"
+mode = "transparent-cell"
+visible = false
+
+[[rules]]
+target = "layer.signal-lamps"
+cue = "save-success"
+set = { style = "arc", density = 0.14 }
+[[rules]]
+target = "layer.relay-moths"
+states = ["focused"]
+set = { density = 0.10 }
+
+[[animations]]
+id = "lamp-pulse"
+target = "layer.signal-lamps"
+property = "glyph_frame"
+values = [0, 0, 1, 1, 2, 1, 0, 0]
+duration = 3.2
+loop = true
+[[animations]]
+id = "lamp-spectrum"
+target = "layer.signal-lamps"
+property = "palette_phase"
+values = [1, 4, 8, 12, 8, 4]
+duration = 6.0
+loop = true
+[[animations]]
+id = "moth-flap"
+target = "layer.relay-moths"
+property = "glyph_frame"
+values = [0, 1, 2, 3, 4, 5, 1, 3]
+duration = 1.4
+loop = true
+[[animations]]
+id = "moth-drift"
+target = "layer.relay-moths"
+property = "offset"
+values = [[0,0],[1,0],[2,0],[3,1],[4,1],[3,1],[2,0],[1,-1],[0,-1],[-1,-1],[-2,0],[-1,0]]
+duration = 5.5
+loop = true
+[[animations]]
+id = "coolant-fall"
+target = "layer.coolant-rain"
+property = "offset"
+values = [[0,0],[0,1],[0,2],[0,3],[0,4],[0,5],[0,6],[0,7],[0,8],[0,9],[0,10],[0,11]]
+duration = 2.8
+loop = true
+[[animations]]
+id = "coolant-shimmer"
+target = "layer.coolant-rain"
+property = "glyph_frame"
+values = [0,1,2,3,2,1]
+duration = 2.2
+loop = true
+[[animations]]
+id = "edit-crawler-run"
+target = "layer.edit-crawler"
+property = "offset"
+values = [[-20,0],[-16,0],[-12,0],[-8,0],[-4,0],[0,0],[4,0],[8,0],[12,0],[16,0],[20,0]]
+duration = 4.0
+loop = true
+[[animations]]
+id = "view-crawler-run"
+target = "layer.view-crawler"
+property = "offset"
+values = [[20,0],[16,0],[12,0],[8,0],[4,0],[0,0],[-4,0],[-8,0],[-12,0],[-16,0],[-20,0]]
+duration = 4.6
+loop = true
+[[animations]]
+id = "aurora-flow"
+target = "layer.diagnostic-aurora"
+property = "pattern_phase"
+values = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+duration = 7.0
+loop = true
+[[animations]]
+id = "aurora-spectrum"
+target = "layer.diagnostic-aurora"
+property = "palette_phase"
+values = [0,3,6,9,12,15,18,15,12,9,6,3]
+duration = 12.0
+loop = true
+[[animations]]
+id = "save-arc-visible"
+target = "layer.save-arc"
+property = "visibility"
+values = [true, true, true, false]
+duration = 1.5
+loop = false
+cue = "save-success"
+[[animations]]
+id = "save-arc-jitter"
+target = "layer.save-arc"
+property = "pattern_phase"
+values = [0,2,5,1,7,3,9,4,11,6]
+duration = 1.5
+loop = false
+cue = "save-success"
+[[animations]]
+id = "manual-arc-visible"
+target = "layer.save-arc"
+property = "visibility"
+values = [true, true, false]
+duration = 1.5
+loop = false
+cue = "user-1"
+
+[[variants]]
+when = { max_width = 72 }
+hide_layers = ["service-modules", "coolant-rain"]
+
+[fallbacks.ascii]
+glyph = "+"
+hide_layers = ["diagnostic-aurora"]
+[fallbacks.monochrome]
+glyph = "."
+hide_layers = ["diagnostic-aurora", "coolant-rain"]
+[fallbacks.narrow]
+glyph = "."
+hide_layers = ["service-modules", "relay-moths", "coolant-rain", "diagnostic-aurora"]
+[fallbacks.reduced_motion]
+glyph = "."
+hide_layers = ["relay-moths", "coolant-rain", "edit-crawler", "view-crawler", "diagnostic-aurora", "save-arc"]

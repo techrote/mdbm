@@ -1,0 +1,56 @@
+[
+  {
+    "path": "themes/dense-glitch-mosaic.theme",
+    "expected_exit": 0,
+    "actual_exit": 0,
+    "output": "VALID dense-glitch-mosaic \u00b7 md-editor-theme/1.1 \u00b7 11 layers \u00b7 SHA256 2c6516ddf05ccb35ef719072a7a9ed17fc2dbbe556ebf39402824a6a1e151d83"
+  },
+  {
+    "path": "themes/diagnostic-aurora.theme",
+    "expected_exit": 0,
+    "actual_exit": 0,
+    "output": "VALID diagnostic-aurora \u00b7 md-editor-theme/1.1 \u00b7 8 layers \u00b7 SHA256 f8bdd43f5ecee5ecdebbb674c252b95a083d5cd608f400c71c5c5e18a7fbd902"
+  },
+  {
+    "path": "themes/maintenance-ecosystem.theme",
+    "expected_exit": 0,
+    "actual_exit": 0,
+    "output": "VALID maintenance-ecosystem \u00b7 md-editor-theme/1.1 \u00b7 11 layers \u00b7 SHA256 4c2f7902eab69bf4dac3231c9d6169119381edb054880374e82edd5cfc8c36e1"
+  },
+  {
+    "path": "themes/neon-circuitry.theme",
+    "expected_exit": 0,
+    "actual_exit": 0,
+    "output": "VALID neon-circuitry \u00b7 md-editor-theme/1.1 \u00b7 8 layers \u00b7 SHA256 5e82e351a7f2faa108cc80855dae481d6cb151a20127293dc9f7a477b15d7f3e"
+  },
+  {
+    "path": "themes/relay-moth-swarm.theme",
+    "expected_exit": 0,
+    "actual_exit": 0,
+    "output": "VALID relay-moth-swarm \u00b7 md-editor-theme/1.1 \u00b7 6 layers \u00b7 SHA256 7580373ee041c9cfff705fab3fd1fbc21191d594761b224c9a281949f5bb024e"
+  },
+  {
+    "path": "themes/restrained-monochrome.theme",
+    "expected_exit": 0,
+    "actual_exit": 0,
+    "output": "VALID restrained-monochrome \u00b7 md-editor-theme/1.1 \u00b7 2 layers \u00b7 SHA256 10b4835bb0d00f32b10d400f081fbc8048af4309076a6b93cc8e7638ae5367b4"
+  },
+  {
+    "path": "tests/fixtures/legacy-safe.theme",
+    "expected_exit": 0,
+    "actual_exit": 0,
+    "output": "VALID legacy-safe \u00b7 md-editor-theme/1.1 \u00b7 1 layers \u00b7 SHA256 a97f1ba8ca1c501650e4f02eb29c87962528f874819157b93e94d6f84bf24698"
+  },
+  {
+    "path": "tests/fixtures/rejected-executable.theme",
+    "expected_exit": 2,
+    "actual_exit": 2,
+    "output": "MDBM: theme: unknown fields scripts"
+  },
+  {
+    "path": "tests/fixtures/rejected-rle.theme",
+    "expected_exit": 2,
+    "actual_exit": 2,
+    "output": "MDBM: Malformed RLE run or unknown token"
+  }
+]

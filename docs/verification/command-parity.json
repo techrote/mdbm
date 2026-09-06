@@ -1,0 +1,1046 @@
+{
+  "registry_count": 114,
+  "rendered_hit_count": 71,
+  "unmapped_hit_commands": [],
+  "commands": [
+    {
+      "id": "file.new",
+      "label": "New document",
+      "keys": [
+        "c-n"
+      ],
+      "keyboard_path": "c-n",
+      "category": "File",
+      "palette_visible": true
+    },
+    {
+      "id": "file.open",
+      "label": "Open file\u2026",
+      "keys": [
+        "c-o"
+      ],
+      "keyboard_path": "c-o",
+      "category": "File",
+      "palette_visible": true
+    },
+    {
+      "id": "file.save",
+      "label": "Save",
+      "keys": [
+        "c-s"
+      ],
+      "keyboard_path": "c-s",
+      "category": "File",
+      "palette_visible": true
+    },
+    {
+      "id": "file.save_as",
+      "label": "Save As\u2026",
+      "keys": [
+        "f4"
+      ],
+      "keyboard_path": "f4",
+      "category": "File",
+      "palette_visible": true
+    },
+    {
+      "id": "file.root",
+      "label": "Change workspace root\u2026",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Change workspace root\u2026",
+      "category": "File",
+      "palette_visible": true
+    },
+    {
+      "id": "file.mkdir",
+      "label": "New directory\u2026",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 New directory\u2026",
+      "category": "File",
+      "palette_visible": true
+    },
+    {
+      "id": "file.rename",
+      "label": "Rename / move selected item\u2026",
+      "keys": [
+        "f2"
+      ],
+      "keyboard_path": "f2",
+      "category": "File",
+      "palette_visible": true
+    },
+    {
+      "id": "file.trash",
+      "label": "Trash selected item\u2026",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Trash selected item\u2026",
+      "category": "File",
+      "palette_visible": true
+    },
+    {
+      "id": "file.quit",
+      "label": "Quit",
+      "keys": [
+        "c-q"
+      ],
+      "keyboard_path": "c-q",
+      "category": "File",
+      "palette_visible": true
+    },
+    {
+      "id": "edit.undo",
+      "label": "Undo",
+      "keys": [
+        "c-z"
+      ],
+      "keyboard_path": "c-z",
+      "category": "Edit",
+      "palette_visible": true
+    },
+    {
+      "id": "edit.redo",
+      "label": "Redo",
+      "keys": [
+        "c-y"
+      ],
+      "keyboard_path": "c-y",
+      "category": "Edit",
+      "palette_visible": true
+    },
+    {
+      "id": "edit.copy",
+      "label": "Copy selection",
+      "keys": [
+        "c-c"
+      ],
+      "keyboard_path": "c-c",
+      "category": "Edit",
+      "palette_visible": true
+    },
+    {
+      "id": "edit.cut",
+      "label": "Cut selection",
+      "keys": [
+        "c-x"
+      ],
+      "keyboard_path": "c-x",
+      "category": "Edit",
+      "palette_visible": true
+    },
+    {
+      "id": "edit.paste",
+      "label": "Paste application clipboard",
+      "keys": [
+        "c-v"
+      ],
+      "keyboard_path": "c-v",
+      "category": "Edit",
+      "palette_visible": true
+    },
+    {
+      "id": "edit.select_all",
+      "label": "Select all",
+      "keys": [
+        "c-a"
+      ],
+      "keyboard_path": "c-a",
+      "category": "Edit",
+      "palette_visible": true
+    },
+    {
+      "id": "edit.find",
+      "label": "Find\u2026",
+      "keys": [
+        "c-f"
+      ],
+      "keyboard_path": "c-f",
+      "category": "Edit",
+      "palette_visible": true
+    },
+    {
+      "id": "edit.find_next",
+      "label": "Find next",
+      "keys": [
+        "f3"
+      ],
+      "keyboard_path": "f3",
+      "category": "Edit",
+      "palette_visible": true
+    },
+    {
+      "id": "edit.find_previous",
+      "label": "Find previous",
+      "keys": [
+        "f7"
+      ],
+      "keyboard_path": "f7",
+      "category": "Edit",
+      "palette_visible": true
+    },
+    {
+      "id": "edit.replace",
+      "label": "Replace\u2026",
+      "keys": [
+        "f6",
+        "c-r"
+      ],
+      "keyboard_path": "f6 / c-r",
+      "category": "Edit",
+      "palette_visible": true
+    },
+    {
+      "id": "edit.goto",
+      "label": "Go to line / column\u2026",
+      "keys": [
+        "c-g"
+      ],
+      "keyboard_path": "c-g",
+      "category": "Navigate",
+      "palette_visible": true
+    },
+    {
+      "id": "edit.insert_tab",
+      "label": "Insert a tab character",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Insert a tab character",
+      "category": "Edit",
+      "palette_visible": true
+    },
+    {
+      "id": "edit.profile",
+      "label": "Toggle Standard / Vim profile",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Toggle Standard / Vim profile",
+      "category": "Edit",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.next",
+      "label": "Next tile",
+      "keys": [
+        "tab"
+      ],
+      "keyboard_path": "tab",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.previous",
+      "label": "Previous tile",
+      "keys": [
+        "s-tab"
+      ],
+      "keyboard_path": "s-tab",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.restore",
+      "label": "Restore all tiles",
+      "keys": [
+        "c-t"
+      ],
+      "keyboard_path": "c-t",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.switch_left",
+      "label": "Switch Filesystem / Contents",
+      "keys": [
+        "escape l"
+      ],
+      "keyboard_path": "escape l",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.swap",
+      "label": "Swap View and Edit",
+      "keys": [
+        "escape w"
+      ],
+      "keyboard_path": "escape w",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.hide",
+      "label": "Hide focused tile",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Hide focused tile",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.toggle_left",
+      "label": "Show / hide left column",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Show / hide left column",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.toggle_right",
+      "label": "Show / hide right column",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Show / hide right column",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.toggle_edit",
+      "label": "Show / hide Edit",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Show / hide Edit",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.toggle_view",
+      "label": "Show / hide View",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Show / hide View",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.filesystem",
+      "label": "Focus Filesystem",
+      "keys": [
+        "escape 1"
+      ],
+      "keyboard_path": "escape 1",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.contents",
+      "label": "Focus Contents",
+      "keys": [
+        "escape 2"
+      ],
+      "keyboard_path": "escape 2",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.edit",
+      "label": "Focus Edit",
+      "keys": [
+        "escape 3"
+      ],
+      "keyboard_path": "escape 3",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "tile.view",
+      "label": "Focus View",
+      "keys": [
+        "escape 4"
+      ],
+      "keyboard_path": "escape 4",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "layout.narrow_left",
+      "label": "Narrow left column",
+      "keys": [
+        "escape ["
+      ],
+      "keyboard_path": "escape [",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "layout.widen_left",
+      "label": "Widen left column",
+      "keys": [
+        "escape ]"
+      ],
+      "keyboard_path": "escape ]",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "layout.shrink_view",
+      "label": "Shrink View",
+      "keys": [
+        "escape -"
+      ],
+      "keyboard_path": "escape -",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "layout.grow_view",
+      "label": "Grow View",
+      "keys": [
+        "escape ="
+      ],
+      "keyboard_path": "escape =",
+      "category": "Tile",
+      "palette_visible": true
+    },
+    {
+      "id": "navigate.refresh",
+      "label": "Refresh filesystem",
+      "keys": [
+        "f5"
+      ],
+      "keyboard_path": "f5",
+      "category": "Navigate",
+      "palette_visible": true
+    },
+    {
+      "id": "navigate.contents_filter",
+      "label": "Filter Contents\u2026",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Filter Contents\u2026",
+      "category": "Navigate",
+      "palette_visible": true
+    },
+    {
+      "id": "navigate.next_link",
+      "label": "Select next preview link",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Select next preview link",
+      "category": "Navigate",
+      "palette_visible": true
+    },
+    {
+      "id": "navigate.previous_link",
+      "label": "Select previous preview link",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Select previous preview link",
+      "category": "Navigate",
+      "palette_visible": true
+    },
+    {
+      "id": "navigate.follow_link",
+      "label": "Follow selected preview link",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Follow selected preview link",
+      "category": "Navigate",
+      "palette_visible": true
+    },
+    {
+      "id": "theme.choose",
+      "label": "Choose theme\u2026",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Choose theme\u2026",
+      "category": "Theme",
+      "palette_visible": true
+    },
+    {
+      "id": "theme.minimal",
+      "label": "Embedded safe theme",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Embedded safe theme",
+      "category": "Theme",
+      "palette_visible": true
+    },
+    {
+      "id": "theme.motion",
+      "label": "Cycle motion intensity",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Cycle motion intensity",
+      "category": "Theme",
+      "palette_visible": true
+    },
+    {
+      "id": "theme.immersive",
+      "label": "Toggle behind-content art",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Toggle behind-content art",
+      "category": "Theme",
+      "palette_visible": true
+    },
+    {
+      "id": "theme.high_contrast",
+      "label": "Toggle high contrast",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Toggle high contrast",
+      "category": "Theme",
+      "palette_visible": true
+    },
+    {
+      "id": "theme.ascii",
+      "label": "Toggle ASCII-only display",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Toggle ASCII-only display",
+      "category": "Theme",
+      "palette_visible": true
+    },
+    {
+      "id": "script.choose",
+      "label": "Choose allowlisted script\u2026",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Choose allowlisted script\u2026",
+      "category": "Scripts",
+      "palette_visible": true
+    },
+    {
+      "id": "script.cancel",
+      "label": "Cancel running script",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Cancel running script",
+      "category": "Scripts",
+      "palette_visible": true
+    },
+    {
+      "id": "help.shortcuts",
+      "label": "Keyboard and mouse guide",
+      "keys": [
+        "f1"
+      ],
+      "keyboard_path": "f1",
+      "category": "Help",
+      "palette_visible": true
+    },
+    {
+      "id": "help.diagnostics",
+      "label": "Diagnostics",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Diagnostics",
+      "category": "Help",
+      "palette_visible": true
+    },
+    {
+      "id": "help.about",
+      "label": "About MDBM",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 About MDBM",
+      "category": "Help",
+      "palette_visible": true
+    },
+    {
+      "id": "command.palette",
+      "label": "Command palette",
+      "keys": [
+        "c-p"
+      ],
+      "keyboard_path": "c-p",
+      "category": "Help",
+      "palette_visible": true
+    },
+    {
+      "id": "menu.ribbon",
+      "label": "Activate ribbon",
+      "keys": [
+        "f10"
+      ],
+      "keyboard_path": "f10",
+      "category": "Help",
+      "palette_visible": true
+    },
+    {
+      "id": "menu.file",
+      "label": "Open File menu",
+      "keys": [
+        "escape f"
+      ],
+      "keyboard_path": "escape f",
+      "category": "Help",
+      "palette_visible": false
+    },
+    {
+      "id": "menu.edit",
+      "label": "Open Edit menu",
+      "keys": [
+        "escape e"
+      ],
+      "keyboard_path": "escape e",
+      "category": "Help",
+      "palette_visible": false
+    },
+    {
+      "id": "menu.tile",
+      "label": "Open Tile menu",
+      "keys": [
+        "escape t"
+      ],
+      "keyboard_path": "escape t",
+      "category": "Help",
+      "palette_visible": false
+    },
+    {
+      "id": "menu.navigate",
+      "label": "Open Navigate menu",
+      "keys": [
+        "escape n"
+      ],
+      "keyboard_path": "escape n",
+      "category": "Help",
+      "palette_visible": false
+    },
+    {
+      "id": "menu.theme",
+      "label": "Open Theme menu",
+      "keys": [
+        "escape h"
+      ],
+      "keyboard_path": "escape h",
+      "category": "Help",
+      "palette_visible": false
+    },
+    {
+      "id": "menu.scripts",
+      "label": "Open Scripts menu",
+      "keys": [
+        "escape s"
+      ],
+      "keyboard_path": "escape s",
+      "category": "Help",
+      "palette_visible": false
+    },
+    {
+      "id": "menu.help",
+      "label": "Open Help menu",
+      "keys": [
+        "escape ?"
+      ],
+      "keyboard_path": "escape ?",
+      "category": "Help",
+      "palette_visible": false
+    },
+    {
+      "id": "navigate.left",
+      "label": "Move left",
+      "keys": [
+        "left"
+      ],
+      "keyboard_path": "left",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "navigate.right",
+      "label": "Move right",
+      "keys": [
+        "right"
+      ],
+      "keyboard_path": "right",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "navigate.up",
+      "label": "Move up",
+      "keys": [
+        "up"
+      ],
+      "keyboard_path": "up",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "navigate.down",
+      "label": "Move down",
+      "keys": [
+        "down"
+      ],
+      "keyboard_path": "down",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "navigate.home",
+      "label": "Move home",
+      "keys": [
+        "home"
+      ],
+      "keyboard_path": "home",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "navigate.end",
+      "label": "Move end",
+      "keys": [
+        "end"
+      ],
+      "keyboard_path": "end",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "navigate.pageup",
+      "label": "Move pageup",
+      "keys": [
+        "pageup"
+      ],
+      "keyboard_path": "pageup",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "navigate.pagedown",
+      "label": "Move pagedown",
+      "keys": [
+        "pagedown"
+      ],
+      "keyboard_path": "pagedown",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "navigate.top",
+      "label": "Move top",
+      "keys": [
+        "c-home"
+      ],
+      "keyboard_path": "c-home",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "navigate.bottom",
+      "label": "Move bottom",
+      "keys": [
+        "c-end"
+      ],
+      "keyboard_path": "c-end",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "navigate.word_left",
+      "label": "Move word-left",
+      "keys": [
+        "c-left"
+      ],
+      "keyboard_path": "c-left",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "navigate.word_right",
+      "label": "Move word-right",
+      "keys": [
+        "c-right"
+      ],
+      "keyboard_path": "c-right",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "edit.select_left",
+      "label": "Extend selection left",
+      "keys": [
+        "s-left"
+      ],
+      "keyboard_path": "s-left",
+      "category": "Edit",
+      "palette_visible": false
+    },
+    {
+      "id": "edit.select_right",
+      "label": "Extend selection right",
+      "keys": [
+        "s-right"
+      ],
+      "keyboard_path": "s-right",
+      "category": "Edit",
+      "palette_visible": false
+    },
+    {
+      "id": "edit.select_up",
+      "label": "Extend selection up",
+      "keys": [
+        "s-up"
+      ],
+      "keyboard_path": "s-up",
+      "category": "Edit",
+      "palette_visible": false
+    },
+    {
+      "id": "edit.select_down",
+      "label": "Extend selection down",
+      "keys": [
+        "s-down"
+      ],
+      "keyboard_path": "s-down",
+      "category": "Edit",
+      "palette_visible": false
+    },
+    {
+      "id": "edit.select_home",
+      "label": "Extend selection home",
+      "keys": [
+        "s-home"
+      ],
+      "keyboard_path": "s-home",
+      "category": "Edit",
+      "palette_visible": false
+    },
+    {
+      "id": "edit.select_end",
+      "label": "Extend selection end",
+      "keys": [
+        "s-end"
+      ],
+      "keyboard_path": "s-end",
+      "category": "Edit",
+      "palette_visible": false
+    },
+    {
+      "id": "edit.backspace",
+      "label": "Backspace",
+      "keys": [
+        "backspace"
+      ],
+      "keyboard_path": "backspace",
+      "category": "Edit",
+      "palette_visible": false
+    },
+    {
+      "id": "edit.delete",
+      "label": "Delete",
+      "keys": [
+        "delete"
+      ],
+      "keyboard_path": "delete",
+      "category": "Edit",
+      "palette_visible": false
+    },
+    {
+      "id": "input.enter",
+      "label": "Activate / newline",
+      "keys": [
+        "enter"
+      ],
+      "keyboard_path": "enter",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "input.escape",
+      "label": "Dismiss / cancel one layer",
+      "keys": [
+        "escape"
+      ],
+      "keyboard_path": "escape",
+      "category": "Help",
+      "palette_visible": false
+    },
+    {
+      "id": "edit.point",
+      "label": "Place caret",
+      "keys": [],
+      "keyboard_path": "Arrows / Ctrl+G",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "tree.point",
+      "label": "Select filesystem row",
+      "keys": [],
+      "keyboard_path": "Filesystem Up/Down",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "tree.toggle",
+      "label": "Expand filesystem row",
+      "keys": [],
+      "keyboard_path": "Filesystem Left/Right",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "contents.point",
+      "label": "Reveal heading source",
+      "keys": [],
+      "keyboard_path": "Contents Up/Down, Enter",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "contents.toggle",
+      "label": "Expand heading",
+      "keys": [],
+      "keyboard_path": "Contents Left/Right",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "view.point",
+      "label": "Reveal preview source",
+      "keys": [],
+      "keyboard_path": "Ctrl+G / Contents Enter",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "view.link",
+      "label": "Activate preview link",
+      "keys": [],
+      "keyboard_path": "Navigate \u2192 Follow selected preview link",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "tile.border",
+      "label": "Focus / tile context menu",
+      "keys": [],
+      "keyboard_path": "Alt+1..4 / Tile menu",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "tile.context",
+      "label": "Tile context menu",
+      "keys": [],
+      "keyboard_path": "Tile menu / Ctrl+P \u2192 Tile context menu",
+      "category": "Navigate",
+      "palette_visible": true
+    },
+    {
+      "id": "layout.capture",
+      "label": "Begin split resize",
+      "keys": [],
+      "keyboard_path": "Alt+[ / Alt+] / Alt+- / Alt+=",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "input.drag",
+      "label": "Captured pointer motion",
+      "keys": [],
+      "keyboard_path": "Shift+Arrows / split-size commands",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "input.release",
+      "label": "Commit captured pointer",
+      "keys": [],
+      "keyboard_path": "Split-size commands commit immediately",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "tile.scroll",
+      "label": "Scroll tile",
+      "keys": [],
+      "keyboard_path": "PageUp/PageDown / Up/Down",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "overlay.row",
+      "label": "Activate overlay row",
+      "keys": [],
+      "keyboard_path": "Overlay Up/Down, Enter",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "overlay.accept",
+      "label": "Accept dialog",
+      "keys": [],
+      "keyboard_path": "Enter",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "overlay.cancel",
+      "label": "Cancel dialog",
+      "keys": [],
+      "keyboard_path": "Escape",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "overlay.action",
+      "label": "Choose confirmation action",
+      "keys": [],
+      "keyboard_path": "Left/Right, Enter",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "overlay.field",
+      "label": "Place dialog caret",
+      "keys": [],
+      "keyboard_path": "Dialog Left/Right/Home/End",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "script.run",
+      "label": "Run allowlisted script",
+      "keys": [],
+      "keyboard_path": "Scripts menu",
+      "category": "Navigate",
+      "palette_visible": false
+    },
+    {
+      "id": "cue.user-1",
+      "label": "Visual cue 1",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Visual cue 1",
+      "category": "Theme",
+      "palette_visible": true
+    },
+    {
+      "id": "cue.user-2",
+      "label": "Visual cue 2",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Visual cue 2",
+      "category": "Theme",
+      "palette_visible": true
+    },
+    {
+      "id": "cue.user-3",
+      "label": "Visual cue 3",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Visual cue 3",
+      "category": "Theme",
+      "palette_visible": true
+    },
+    {
+      "id": "cue.user-4",
+      "label": "Visual cue 4",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Visual cue 4",
+      "category": "Theme",
+      "palette_visible": true
+    },
+    {
+      "id": "cue.user-5",
+      "label": "Visual cue 5",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Visual cue 5",
+      "category": "Theme",
+      "palette_visible": true
+    },
+    {
+      "id": "cue.user-6",
+      "label": "Visual cue 6",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Visual cue 6",
+      "category": "Theme",
+      "palette_visible": true
+    },
+    {
+      "id": "cue.user-7",
+      "label": "Visual cue 7",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Visual cue 7",
+      "category": "Theme",
+      "palette_visible": true
+    },
+    {
+      "id": "cue.user-8",
+      "label": "Visual cue 8",
+      "keys": [],
+      "keyboard_path": "Ctrl+P \u2192 Visual cue 8",
+      "category": "Theme",
+      "palette_visible": true
+    }
+  ]
+}

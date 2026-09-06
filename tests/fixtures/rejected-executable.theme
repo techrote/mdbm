@@ -1,0 +1,5 @@
+schema = "md-editor-theme/1.1"
+id = "rejected-executable"
+name = "MUST fail: executable themes are prohibited"
+[scripts]
+startup = "print('Never executed')"

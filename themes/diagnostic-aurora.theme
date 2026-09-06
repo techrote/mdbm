@@ -1,0 +1,234 @@
+schema = "md-editor-theme/1.1"
+id = "diagnostic-aurora"
+name = "06 · Diagnostic Aurora"
+description = "Animated service-weather display: drifting aurora bands, prismatic coolant rain and finite arc-storm bursts on host cues."
+seed = 31415
+seed_mode = "fixed"
+fps = 12
+
+[palette]
+paper = "#080b14"
+ink = "#d9e4ed"
+muted = "#6c7180"
+frame = "#303b55"
+accent = "#82e0cf"
+code = "#e0c185"
+link = "#78c9ee"
+aurora = "#785bba"
+coolant = "#71c8e8"
+arc = "#d9eaff"
+rail = "#354562"
+
+[ramps.spectrum]
+colours = ["#263d72", "#5b57ac", "#bd68c4", "#64d7c5", "#d9d06f", "#6cbce2"]
+steps = 24
+
+[geometry]
+outer = [1, 1, 1, 1]
+border = 1
+divider = 1
+spacer = 0
+
+[styles.aurora]
+fg = "aurora"
+bg = "paper"
+[styles.coolant]
+fg = "coolant"
+bg = "paper"
+[styles.arc]
+fg = "arc"
+bg = "paper"
+bold = true
+[styles.rail]
+fg = "rail"
+bg = "paper"
+
+[patterns.aurora-a]
+kind = "bands"
+glyphs = [".", "~", "=", "*", "+"]
+period = [19, 2]
+density = 0.55
+style = "aurora"
+[patterns.aurora-b]
+kind = "stepped-path"
+glyphs = ["·", "~", "-"]
+period = [17, 5]
+density = 0.45
+style = "aurora"
+[patterns.coolant]
+kind = "scatter"
+glyphs = [".", "o", "O", "*"]
+period = [9, 5]
+density = 0.045
+style = "coolant"
+[patterns.arc]
+kind = "slice-displacement"
+glyphs = [".", "*", "+", "~", "#"]
+period = [7, 2]
+density = 0.8
+amplitude = 9
+style = "arc"
+[patterns.rail]
+kind = "connectors"
+glyphs = ["─", "│", "+"]
+period = [15, 5]
+style = "rail"
+
+[[layers]]
+id = "aurora-a"
+slot = "outer"
+pattern = "aurora-a"
+mode = "transparent-cell"
+[[layers]]
+id = "aurora-b"
+slot = "outer"
+pattern = "aurora-b"
+mode = "underlay"
+opacity = 0.6
+[[layers]]
+id = "coolant"
+slot = "outer"
+pattern = "coolant"
+mode = "transparent-cell"
+[[layers]]
+id = "edit-rail"
+slot = "tile.edit.chrome"
+pattern = "rail"
+mode = "transparent-cell"
+[[layers]]
+id = "view-rail"
+slot = "tile.view.chrome"
+pattern = "rail"
+mode = "transparent-cell"
+[[layers]]
+id = "immersive-aurora"
+slot = "behind-content"
+pattern = "aurora-a"
+mode = "underlay"
+opacity = 0.28
+[[layers]]
+id = "save-arc"
+slot = "divider"
+pattern = "arc"
+mode = "transparent-cell"
+visible = false
+[[layers]]
+id = "failure-arc"
+slot = "outer"
+pattern = "arc"
+mode = "transparent-cell"
+visible = false
+
+[[animations]]
+id = "aurora-a-flow"
+target = "layer.aurora-a"
+property = "pattern_phase"
+values = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+duration = 6.0
+loop = true
+[[animations]]
+id = "aurora-a-spectrum"
+target = "layer.aurora-a"
+property = "palette_phase"
+values = [0,3,6,9,12,15,18,21,18,15,12,9,6,3]
+duration = 10.0
+loop = true
+[[animations]]
+id = "aurora-b-flow"
+target = "layer.aurora-b"
+property = "pattern_phase"
+values = [15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0]
+duration = 8.0
+loop = true
+[[animations]]
+id = "coolant-fall"
+target = "layer.coolant"
+property = "offset"
+values = [[0,0],[0,1],[0,2],[0,3],[1,4],[1,5],[1,6],[0,7],[0,8],[-1,9],[-1,10],[0,11]]
+duration = 2.4
+loop = true
+[[animations]]
+id = "coolant-frame"
+target = "layer.coolant"
+property = "glyph_frame"
+values = [0,1,2,3,2,1]
+duration = 1.8
+loop = true
+[[animations]]
+id = "edit-rail-flow"
+target = "layer.edit-rail"
+property = "pattern_phase"
+values = [0,1,2,3,4,5,6,7]
+duration = 5.0
+loop = true
+[[animations]]
+id = "view-rail-flow"
+target = "layer.view-rail"
+property = "pattern_phase"
+values = [7,6,5,4,3,2,1,0]
+duration = 5.0
+loop = true
+[[animations]]
+id = "immersive-aurora-flow"
+target = "layer.immersive-aurora"
+property = "offset"
+values = [[0,0],[1,0],[2,1],[3,1],[4,0],[3,-1],[2,-1],[1,0]]
+duration = 7.5
+loop = true
+[[animations]]
+id = "save-arc-on"
+target = "layer.save-arc"
+property = "visibility"
+values = [true,true,true,false]
+duration = 1.5
+loop = false
+cue = "save-success"
+[[animations]]
+id = "save-arc-phase"
+target = "layer.save-arc"
+property = "pattern_phase"
+values = [0,3,1,5,2,7,4,9,6]
+duration = 1.5
+loop = false
+cue = "save-success"
+[[animations]]
+id = "failure-arc-on"
+target = "layer.failure-arc"
+property = "visibility"
+values = [true,true,false,false]
+duration = 2.0
+loop = false
+cue = "save-failure"
+[[animations]]
+id = "failure-arc-phase"
+target = "layer.failure-arc"
+property = "pattern_phase"
+values = [1,7,2,9,3,11,4,13]
+duration = 2.0
+loop = false
+cue = "save-failure"
+[[animations]]
+id = "manual-storm-on"
+target = "layer.failure-arc"
+property = "visibility"
+values = [true,true,true,false]
+duration = 2.0
+loop = false
+cue = "user-1"
+
+[[variants]]
+when = { max_width = 72 }
+hide_layers = ["aurora-b", "coolant"]
+
+[fallbacks.ascii]
+glyph = "."
+hide_layers = ["immersive-aurora"]
+[fallbacks.monochrome]
+glyph = "."
+hide_layers = ["coolant", "immersive-aurora"]
+[fallbacks.narrow]
+glyph = "."
+hide_layers = ["aurora-b", "coolant", "immersive-aurora", "failure-arc"]
+[fallbacks.reduced_motion]
+glyph = "."
+hide_layers = ["aurora-b", "coolant", "immersive-aurora", "save-arc", "failure-arc"]

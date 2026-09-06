@@ -1,0 +1,14 @@
+Offline isolated wheel install:
+python -m venv --system-site-packages /tmp/mdbm-a2-smoke
+/tmp/mdbm-a2-smoke/bin/python -m pip install --no-deps --force-reinstall dist/mdbm_workspace-1.0.0a2-py3-none-any.whl
+WARNING: The directory '/home/oai/.cache/pip' or its parent directory is not owned or is not writable by the current user. The cache has been disabled. Check the permissions and owner of that directory. If executing pip with sudo, you should use sudo's -H flag.
+Name: mdbm-workspace
+Version: 1.0.0a2
+Summary: A protected cell-composited terminal Markdown workspace
+Home-page: 
+Author: 
+Author-email: 
+License: 
+Location: /tmp/mdbm-a2-smoke/lib/python3.13/site-packages
+Requires: markdown-it-py, mdit-py-plugins, prompt-toolkit, Pygments, regex, Send2Trash, wcwidth
+Required-by: 

@@ -1,0 +1,11 @@
+# MDBM implementation and continuation prompt
+
+Build and maintain a cross-platform terminal Markdown workspace whose only runtime Python source is `mdbm.py`. Read SECURITY_MODEL.md first, then MDBM_PRODUCT_SPEC.md, CONFIG_FILE_SPEC.md, THEME_FILE_SPEC.md, MDBM_TECHNICAL_DESIGN.md, TEST_AND_ACCEPTANCE_PLAN.md and ROADMAP.md. That is the precedence order. Consult REQUESTED_PLAN.md for the user's complete request. Do not override security to make a demo easier.
+
+Keep terminal lifecycle/input/diff output in prompt_toolkit, and layout/cells/hits in MDBM. Four tile identities retain local state across visibility, swaps and modal activity. Every actionable hit resolves to a central command with a real keyboard path. Themes are closed TOML data compiled to bounded decorative programs, never Python, shell, raw ANSI or callbacks. Paint protected host controls last. Validate complete candidates before replacing a theme.
+
+Preserve source bytes semantically: sanitize display, not existing file text. Use grapheme-aware edit offsets, stable source maps, delta undo, atomic saves, external-change detection, no-clobber creation, rooted paths and recovery carrying the old baseline fingerprint. Script execution requires the explicit sibling allowlist and confirmation, JSON argument arrays, shell=False and bounded output. No theme event may run a script.
+
+Work in milestones: contracts/fixtures; bootstrap/models; canvas/safety; themes; geometry/input; editing/Markdown; lifecycle/menus/scripts; tests/accessibility/package. At each milestone execute the relevant tests. Add regressions for any bug fixed. Never substitute a screenshot mock-up for a runnable TUI or claim unseen platform tests passed.
+
+Verification: `python -m compileall -q mdbm.py`; `python mdbm.py --diagnostics`; validate every `themes/*.theme`; `python -m pytest -q`; actual PTY editing/save/exit test; deterministic golden profiles; performance benchmark; inspect screenshots/cell captures. Publish exact versions, test counts, skipped tests, timing scope and remaining gates in IMPLEMENTATION_REPORT.md. Keep `mdbm.py` the sole runtime source. Definition of done is the user's plan, including native terminal/manual acceptance; partial gates must remain labelled partial.

@@ -1,0 +1,22 @@
+Wheel smoke with host dependency path (offline runner):
+PYTHONPATH=/opt/pyvenv/lib/python3.13/site-packages
+--- version ---
+MDBM 1.0.0a2
+--- installed module/data ---
+module= /tmp/mdbm-a2-smoke/lib/python3.13/site-packages/mdbm.py
+version= 1.0.0a2
+data_dir= /tmp/mdbm-a2-smoke/share/mdbm
+theme_count= 6
+themes= ['dense-glitch-mosaic.theme', 'diagnostic-aurora.theme', 'maintenance-ecosystem.theme', 'neon-circuitry.theme', 'relay-moth-swarm.theme', 'restrained-monochrome.theme']
+example_exists= True
+--- installed theme validation ---
+VALID maintenance-ecosystem · md-editor-theme/1.1 · 11 layers · SHA256 4c2f7902eab69bf4dac3231c9d6169119381edb054880374e82edd5cfc8c36e1
+VALID relay-moth-swarm · md-editor-theme/1.1 · 6 layers · SHA256 7580373ee041c9cfff705fab3fd1fbc21191d594761b224c9a281949f5bb024e
+VALID diagnostic-aurora · md-editor-theme/1.1 · 8 layers · SHA256 f8bdd43f5ecee5ecdebbb674c252b95a083d5cd608f400c71c5c5e18a7fbd902
+--- installed snapshot header ---
+ MDBM  File  Edit  Tile  Navigate  Theme  Scripts  Help                    [+T] 
+[==]─A.X──────││──.───────[=..│AUX──────────││──────[==]─AUX│────────────.││.─[=
+│ │ BAY     . ││        .   ││BAY           ││        │ BAY││             ││    
+[==]─┌ Filesyst[T][M][x]┐ | ┌ View ──────────────────────────────[S][M][x]┐[==]─
+│ │ B│             ││   │ | │==~                    @==~                  ││ │ B
+──.─.│─  animated-theme││ | │=Animated Theme Showcase                    @│──.─.

@@ -1,0 +1,14 @@
+schema = "md-editor-theme/1.0"
+id = "legacy-safe"
+name = "Legacy safe subset"
+[palette]
+paper = "#111111"
+ink = "#eeeeee"
+[textures.mesh]
+kind = "grid"
+glyphs = ["+", "."]
+period = [6, 3]
+[[panels]]
+id = "mesh"
+slot = "outer"
+pattern = "mesh"

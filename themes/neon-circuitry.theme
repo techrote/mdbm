@@ -1,0 +1,143 @@
+schema = "md-editor-theme/1.1"
+id = "neon-circuitry"
+name = "02 · Neon Circuitry"
+description = "Midnight drafting bay with cyan rails, violet circuit modules and sparse amber nodes."
+seed = 10841
+seed_mode = "fixed"
+fps = 12
+
+[palette]
+paper = "#091322"
+ink = "#d8e9f2"
+muted = "#7392a4"
+frame = "#1e6879"
+accent = "#54ead6"
+code = "#a7caff"
+link = "#74e8ef"
+violet = "#a681eb"
+amber = "#f0b375"
+
+[ramps.pulse]
+colours = ["#215e6b", "#73efe0", "#7664c4"]
+steps = 16
+
+[geometry]
+outer = [0, 0, 0, 0]
+border = 1
+divider = 0
+spacer = 0
+
+[styles.trace]
+fg = "#22606b"
+bg = "paper"
+[styles.node]
+fg = "violet"
+bg = "paper"
+[styles.pulse]
+fg = "accent"
+bg = "paper"
+[styles.inner]
+fg = "#184355"
+bg = "paper"
+
+[art.module]
+rows = ["╭─┬──╮   ┌─┐", "│ ▪  ├───┤∙│", "╰────╯   └─┘"]
+style = "trace"
+[motifs.module]
+art = "module"
+gap = [6, 2]
+
+[patterns.backbone]
+kind = "stepped-path"
+glyphs = ["─", "┼", "│"]
+period = [11, 4]
+style = "trace"
+[patterns.nodes]
+kind = "scatter"
+glyphs = ["▪", "+", "·"]
+period = [8, 3]
+density = 0.035
+style = "node"
+[patterns.inner]
+kind = "ladders"
+glyphs = ["│", "─"]
+period = [12, 4]
+style = "inner"
+[patterns.silent]
+kind = "grid"
+glyphs = ["·"]
+period = [14, 5]
+style = "inner"
+
+[[layers]]
+id = "backbone"
+slot = "outer"
+pattern = "backbone"
+mode = "transparent-cell"
+[[layers]]
+id = "modules"
+slot = "outer"
+motif = "module"
+mode = "underlay"
+[[layers]]
+id = "signal-nodes"
+slot = "outer"
+pattern = "nodes"
+mode = "transparent-cell"
+[[layers]]
+id = "edit-rails"
+slot = "tile.edit.chrome"
+pattern = "inner"
+mode = "transparent-cell"
+[[layers]]
+id = "view-rails"
+slot = "tile.view.chrome"
+pattern = "inner"
+mode = "transparent-cell"
+[[layers]]
+id = "tree-rails"
+slot = "tile.filesystem.chrome"
+pattern = "inner"
+mode = "transparent-cell"
+[[layers]]
+id = "contents-rails"
+slot = "tile.contents.chrome"
+pattern = "inner"
+mode = "transparent-cell"
+[[layers]]
+id = "immersive-grid"
+slot = "behind-content"
+pattern = "silent"
+mode = "underlay"
+
+[[rules]]
+target = "layer.signal-nodes"
+cue = "save-success"
+set = { style = "pulse", density = 0.12 }
+[[rules]]
+target = "layer.edit-rails"
+states = ["focused", "dirty"]
+set = { style = "node" }
+
+[[animations]]
+id = "node-breathe"
+target = "layer.signal-nodes"
+property = "density"
+values = [0.02, 0.035, 0.05, 0.035]
+duration = 8.0
+loop = true
+
+[[variants]]
+when = { max_width = 72 }
+hide_layers = ["modules"]
+
+[fallbacks.ascii]
+glyph = "+"
+[fallbacks.monochrome]
+glyph = "."
+hide_layers = ["signal-nodes"]
+[fallbacks.narrow]
+glyph = "."
+hide_layers = ["modules", "signal-nodes"]
+[fallbacks.reduced_motion]
+glyph = "."

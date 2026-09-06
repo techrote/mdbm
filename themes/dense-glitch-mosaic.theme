@@ -1,0 +1,152 @@
+schema = "md-editor-theme/1.1"
+id = "dense-glitch-mosaic"
+name = "03 · Dense Glitch Mosaic"
+description = "Layered signal archaeology: token-grid panels, broken rails, RLE texture and bounded chromatic interference."
+seed = 67
+seed_mode = "fixed"
+fps = 12
+
+[palette]
+paper = "#101021"
+ink = "#e6e0f2"
+muted = "#9991b0"
+frame = "#60548c"
+accent = "#e1a0ec"
+code = "#a3dede"
+link = "#9be7e2"
+pink = "#d577bb"
+teal = "#56a9ae"
+
+[geometry]
+outer = [0, 0, 0, 0]
+border = 1
+divider = 1
+spacer = 0
+
+[styles.substrate]
+fg = "#39334f"
+bg = "paper"
+[styles.mosaic]
+fg = "#837396"
+bg = "paper"
+[styles.pink]
+fg = "pink"
+bg = "paper"
+[styles.teal]
+fg = "teal"
+bg = "paper"
+
+[art.panel]
+grid = ["tl hz hz hz tr sp dot sp vl sp", "vl dot bar dot vl sp hz hz cross hz", "bl hz hz hz br sp dot sp vl sp"]
+legend = { tl = "┌", tr = "┐", bl = "└", br = "┘", hz = "─", vl = "│", cross = "┼", dot = "·", bar = "▒", sp = " " }
+style = "mosaic"
+[art.raster]
+rle = ["3:dot 1:bar 4:space 1:plus 3:dot", "1:bar 3:space 2:dot 1:plus 5:space"]
+legend = { dot = "·", bar = "░", plus = "+", space = " " }
+style = "substrate"
+
+[patterns.substrate]
+kind = "noise"
+glyphs = ["·", ":", "░", "/", " "]
+period = [8, 4]
+density = 0.65
+style = "substrate"
+[patterns.fractures]
+kind = "fragmentation"
+glyphs = ["─", "│", "+", "▪"]
+period = [9, 3]
+density = 0.45
+style = "pink"
+[patterns.channels]
+kind = "colour-channel-offset"
+glyphs = ["│", "·", ":"]
+period = [19, 4]
+style = "teal"
+[patterns.rails]
+kind = "brackets"
+glyphs = ["[", "]", "─"]
+period = [13, 4]
+style = "mosaic"
+[patterns.mask]
+kind = "noise"
+glyphs = ["."]
+density = 0.75
+
+[masks.chunks]
+pattern = "mask"
+threshold = 0.3
+
+[[layers]]
+id = "substrate"
+slot = "outer"
+pattern = "substrate"
+[[layers]]
+id = "panels"
+slot = "outer"
+art = "panel"
+mode = "transparent-cell"
+mask = "chunks"
+[[layers]]
+id = "raster"
+slot = "outer"
+art = "raster"
+mode = "underlay"
+[[layers]]
+id = "fractures"
+slot = "outer"
+pattern = "fractures"
+mode = "transparent-cell"
+[[layers]]
+id = "channels"
+slot = "outer"
+pattern = "channels"
+mode = "transparent-cell"
+[[layers]]
+id = "divider-panels"
+slot = "divider"
+pattern = "rails"
+[[layers]]
+id = "edit-panels"
+slot = "tile.edit.chrome"
+pattern = "rails"
+[[layers]]
+id = "view-panels"
+slot = "tile.view.chrome"
+pattern = "rails"
+[[layers]]
+id = "tree-panels"
+slot = "tile.filesystem.chrome"
+pattern = "rails"
+[[layers]]
+id = "contents-panels"
+slot = "tile.contents.chrome"
+pattern = "rails"
+[[layers]]
+id = "immersive-raster"
+slot = "behind-content"
+art = "raster"
+mode = "underlay"
+
+[[animations]]
+id = "slow-channel-drift"
+target = "layer.channels"
+property = "pattern_phase"
+values = [0.0, 1.0, 2.0, 1.0]
+duration = 12.0
+loop = true
+
+[[rules]]
+target = "layer.fractures"
+cue = "user-1"
+set = { density = 0.8, style = "teal" }
+
+[fallbacks.ascii]
+glyph = ":"
+[fallbacks.monochrome]
+glyph = "."
+hide_layers = ["channels"]
+[fallbacks.narrow]
+glyph = "."
+hide_layers = ["panels", "raster", "channels", "fractures"]
+[fallbacks.reduced_motion]
+glyph = "."

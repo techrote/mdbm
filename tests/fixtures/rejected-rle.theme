@@ -1,0 +1,6 @@
+schema = "md-editor-theme/1.1"
+id = "rejected-rle"
+name = "MUST fail: oversized RLE"
+[art.excessive]
+rle = ["99999999:cell"]
+legend = { cell = "x" }
