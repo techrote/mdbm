@@ -1,4 +1,4 @@
-# MDBM
+# mdbm
 
 **A cell-native Markdown reader/editor for the terminal.**
 
