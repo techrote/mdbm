@@ -69,6 +69,41 @@ Saves publish atomically and check disk fingerprints. Existing destinations, cha
 
 ## Appearance and configuration
 
+The [theme catalogue](docs/THEME_CATALOG.md) lists **21 additional themes** with
+launch IDs, guides and previews, alongside the six original file-based themes.
+
+The **Solid material relief** collection develops the sculpted trio into six
+filled, shaded designs: `intaglio-bronze`, `intaglio-gunmetal`,
+`reliquary-amethyst`, `reliquary-basalt`, `monolith-glacial`, and
+`monolith-aurora`. These are now continuous sculpted environments: **32 paired
+foreground/background tones** wrap around the actual borders, corners, tile
+openings and dividers under consistent upper-left lighting. Update the renderer
+and themes together for geometry-fitted frames and per-cell styles. See
+[the material guide](examples/solid-relief-showcase.md) and
+[previews with multi-scale shading checks](docs/screenshots/solid-relief/gallery.html).
+
+![Six geometry-fitted sculpted environments](docs/screenshots/solid-relief/comparison.png)
+
+The **Sculpted ASCII relief** trio adds `iron-intaglio`, `obsidian-reliquary`,
+and `glacier-monolith`: hand-drawn die plates, carved vaults and fractured ice
+using printable ASCII contours and hatching. See [the guide](examples/sculpted-ascii-showcase.md),
+[plain NFO artwork](examples/relief-studies.nfo), and [actual-cell previews](docs/screenshots/relief/gallery.html).
+Use a 140 x 58 terminal for the full relief; all three themes are static.
+
+For a heavier ANSI/NFO aesthetic, the **Underground NFO collection** adds
+`rust-bastion`, `void-cathedral`, `acid-overdrive`, `cryo-vault`, `cinder-relic`,
+and `static-revenant`: extruded block mastheads, distressed shaded borders,
+raised modules and slow particles. See [the NFO showcase](examples/nfo-theme-showcase.md)
+and [actual-cell previews](docs/screenshots/nfo/gallery.html). A 140 x 52 terminal
+shows the full designs; smaller layouts simplify their decoration.
+
+Six additional appearance themes are available: `botanical-ledger`,
+`tidal-observatory`, `ember-foundry`, `polar-blueprint`, `velvet-nocturne`, and
+`desert-cartography`. They include three light/static and three dark/animated
+designs. See [the theme showcase](examples/appearance-theme-showcase.md) for
+palettes and usage, and [the actual-cell comparison gallery](docs/screenshots/appearance/gallery.html)
+for previews. Launch any of them with `python mdbm.py --theme <id>`.
+
 MDBM now ships three original reference themes — `restrained-monochrome`, `neon-circuitry` and `dense-glitch-mosaic` — plus three animated examples: `maintenance-ecosystem`, `relay-moth-swarm`, and `diagnostic-aurora`. `minimal` remains embedded for recovery. The animated set is directly inspired by the motion language of `maintenance_ecosystem_v4_2`: service lamps/crawlers, relay moth formations, coolant and diagnostic aurora/arc effects, re-expressed strictly as safe theme data.
 
 See `docs/screenshots/gallery.html` for static compositor snapshots and `docs/screenshots/animated/gallery.html` for GIF captures generated from the actual compositor. Open `examples/animated-theme-showcase.md` in MDBM for a live tour. **F8** is bound to `cue.user-1` in the sample config so Maintenance Ecosystem and Diagnostic Aurora can fire their manual arc-storm demo.

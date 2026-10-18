@@ -1,0 +1,56 @@
+[
+  {
+    "theme": "intaglio-bronze",
+    "profiles": 8,
+    "sizes": 4,
+    "additional_layouts": 4,
+    "max_paint_operations": 6704,
+    "budget": 200000,
+    "frame_layers": 7
+  },
+  {
+    "theme": "intaglio-gunmetal",
+    "profiles": 8,
+    "sizes": 4,
+    "additional_layouts": 4,
+    "max_paint_operations": 6704,
+    "budget": 200000,
+    "frame_layers": 7
+  },
+  {
+    "theme": "reliquary-amethyst",
+    "profiles": 8,
+    "sizes": 4,
+    "additional_layouts": 4,
+    "max_paint_operations": 6704,
+    "budget": 200000,
+    "frame_layers": 7
+  },
+  {
+    "theme": "reliquary-basalt",
+    "profiles": 8,
+    "sizes": 4,
+    "additional_layouts": 4,
+    "max_paint_operations": 6704,
+    "budget": 200000,
+    "frame_layers": 7
+  },
+  {
+    "theme": "monolith-glacial",
+    "profiles": 8,
+    "sizes": 4,
+    "additional_layouts": 4,
+    "max_paint_operations": 6704,
+    "budget": 200000,
+    "frame_layers": 7
+  },
+  {
+    "theme": "monolith-aurora",
+    "profiles": 8,
+    "sizes": 4,
+    "additional_layouts": 4,
+    "max_paint_operations": 6704,
+    "budget": 200000,
+    "frame_layers": 7
+  }
+]

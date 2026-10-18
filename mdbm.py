@@ -671,12 +671,12 @@ def reduce_layout(state: LayoutState, action: str, value: Any = None) -> LayoutS
 # =============================================================================
 STATES = frozenset('focused active previous hover pressed selected disabled dirty caution destructive busy success warning error'.split())
 CUES = frozenset('startup focus-change tile-show tile-hide tile-swap file-activate dirty-change save-success save-failure mode-change menu-open menu-close no-context-actions'.split()) | frozenset(f'user-{i}' for i in range(1,9))
-SLOTS = frozenset({'outer','divider','spacer','behind-content'} | {f'tile.{t.value}.chrome' for t in Tile})
+SLOTS = frozenset({'outer','divider','divider.vertical','divider.horizontal','spacer','behind-content'} | {f'tile.{t.value}.chrome' for t in Tile})
 PATTERN_KINDS = frozenset('tile stripe checker hatch grid scanline dither scatter noise vignette bands dropout slice-displacement fragmentation colour-channel-offset rails ladders stepped-path brackets connectors'.split())
 MODES = frozenset('replace underlay glyph-only foreground-only background-only mask transparent-cell dither-blend'.split())
 THEME_ROOT_KEYS = frozenset('schema id name description extends seed seed_mode fps palette ramps styles geometry glyphs art motifs patterns masks layers animations rules variants fallbacks'.split())
 STYLE_KEYS = frozenset('fg bg bold italic underline dim strike extends'.split())
-LAYER_KEYS = frozenset('id slot art pattern motif style mode offset repeat opacity mask visible family transform'.split())
+LAYER_KEYS = frozenset('id slot art pattern motif style mode offset repeat opacity mask visible family transform fit frame_insets'.split())
 RULE_PROPERTIES = frozenset('style opacity density offset visible phase mask_threshold palette_phase'.split())
 TRACK_PROPERTIES = frozenset('glyph_frame style palette_phase pattern_phase offset density mask_threshold visibility'.split())
 # Spatial/shape animation can run at the theme frame cadence. Potentially flash-like
@@ -834,6 +834,7 @@ class Theme:
     glyphs: Mapping[str,Any]
     art: Mapping[str,tuple[tuple[str,...],...]]
     art_styles: Mapping[str,str]
+    art_cell_styles: Mapping[str,tuple[tuple[str,...],...]]
     patterns: Mapping[str,Any]
     motifs: Mapping[str,Any]
     masks: Mapping[str,Any]
@@ -998,9 +999,11 @@ class ThemeCompiler:
             glyphs[key] = normalized
         art: dict[str,tuple[tuple[str,...],...]] = {}
         art_styles: dict[str,str] = {}
+        art_cell_styles: dict[str,tuple[tuple[str,...],...]] = {}
+        style_tokens: dict[str,str] = {}
         decoded = 0
         for key,item in data.get('art',{}).items():
-            ident(key); closed(item,{'rows','grid','rle','legend','style'},'art '+key)
+            ident(key); closed(item,{'rows','grid','rle','legend','style','style_grid'},'art '+key)
             representations = [k for k in ('rows','grid','rle') if k in item]
             if len(representations)!=1:
                 raise ThemeError('Art requires exactly one of rows, grid or rle')
@@ -1044,6 +1047,24 @@ class ThemeCompiler:
             if decoded>MAX_ART_CELLS: raise ThemeError('Padded art exceeds 262144 cells')
             art[key] = tuple(row+(' ',)*(row_width-len(row)) for row in decoded_rows)
             art_styles[key] = style_ref(item.get('style','border'))
+            if 'style_grid' in item:
+                grid = item['style_grid']
+                if not isinstance(grid,list) or len(grid)!=len(art[key]):
+                    raise ThemeError('Art style_grid must match the decoded art dimensions')
+                styled_rows = []
+                for row in grid:
+                    if not isinstance(row,str) or len(row.split())!=row_width:
+                        raise ThemeError('Art style_grid must match the decoded art dimensions')
+                    decoded += row_width
+                    if decoded>MAX_ART_CELLS:
+                        raise ThemeError('Art and style cells exceed 262144 cells')
+                    resolved_row=[]
+                    for value in row.split():
+                        if value not in style_tokens:
+                            style_tokens[value]=style_ref(value)
+                        resolved_row.append(style_tokens[value])
+                    styled_rows.append(tuple(resolved_row))
+                art_cell_styles[key] = tuple(styled_rows)
         patterns: dict[str,Any] = {}
         for key,item in data.get('patterns',{}).items():
             ident(key); closed(item,{'kind','glyphs','style','period','density','phase','amplitude'},'pattern '+key)
@@ -1106,6 +1127,19 @@ class ThemeCompiler:
             family = known(item['family'],'glyphs',glyphs) if 'family' in item else ''
             if transform!='none' and (not family or transform not in glyphs[family]):
                 raise ThemeError('Transform requires an explicit matching glyph-family map')
+            fit = item.get('fit','none')
+            if fit not in ('none','frame'):
+                raise ThemeError('Unknown art fitting mode')
+            insets = pair(item.get('frame_insets',[0,0,0,0]),0,256,'frame_insets',4)
+            if fit=='frame':
+                if src!='art' or item['slot'] not in ({'outer','divider.vertical','divider.horizontal'} | {f'tile.{t.value}.chrome' for t in Tile}):
+                    raise ThemeError('Frame fitting requires direct art in a frame slot')
+                if transform!='none' or item.get('offset',[0,0])!=[0,0]:
+                    raise ThemeError('Frame fitting does not support transforms or offsets')
+                if insets[0]+insets[2]>=len(art[source_id]) or insets[1]+insets[3]>=len(art[source_id][0]):
+                    raise ThemeError('Frame insets must leave a nonempty source center')
+            elif 'frame_insets' in item:
+                raise ThemeError('frame_insets requires frame fitting')
             layers.append({'id':key,'slot':item['slot'],src:source_id,
                            'style':style_ref(item['style']) if 'style' in item else '',
                            'mode':mode,'offset':pair(item.get('offset',[0,0]),-512,512,'layer offset'),
@@ -1113,7 +1147,7 @@ class ThemeCompiler:
                            'opacity':finite_number(item.get('opacity',1),0,1,'layer opacity'),
                            'mask':known(item['mask'],'masks',masks) if 'mask' in item else '',
                            'visible':flag(item.get('visible',True),'layer visibility'),
-                           'family':family,'transform':transform})
+                           'family':family,'transform':transform,'fit':fit,'frame_insets':insets})
         def target(value: Any) -> str:
             if not isinstance(value,str) or not value.startswith('layer.') or value[6:] not in layer_ids:
                 raise ThemeError('Target must name a declared layer: layer.<id>')
@@ -1139,6 +1173,8 @@ class ThemeCompiler:
             if cue and cue not in CUES:
                 raise ThemeError('Unknown host cue')
             props = closed(item.get('set',{}),RULE_PROPERTIES,'rule set')
+            if 'offset' in props and next(layer for layer in layers if layer['id']==target(item.get('target')))['fit']=='frame':
+                raise ThemeError('Frame fitted layers cannot animate or override offsets')
             rules.append({'target':target(item.get('target')),'states':tuple(states),'cue':cue,
                           'set':{k:property_value(k,v) for k,v in props.items()}})
         animations: list[dict[str,Any]] = []
@@ -1155,6 +1191,8 @@ class ThemeCompiler:
             prop = item.get('property')
             if prop not in TRACK_PROPERTIES:
                 raise ThemeError('Unknown animation property')
+            if prop=='offset' and next(layer for layer in layers if layer['id']==target(item.get('target')))['fit']=='frame':
+                raise ThemeError('Frame fitted layers cannot animate or override offsets')
             values = item.get('values',[])
             if not isinstance(values,list) or not 1<=len(values)<=256:
                 raise ThemeError('Animation needs 1–256 frames')
@@ -1214,7 +1252,7 @@ class ThemeCompiler:
         fps = int(finite_number(data.get('fps',12),1,30,'theme FPS',True))
         digest = hashlib.sha256(json.dumps(data,sort_keys=True).encode()).hexdigest()
         return Theme(data['id'],name,digest,freeze(palette),freeze(styles),freeze(geometry),
-                     freeze(glyphs),freeze(art),freeze(art_styles),freeze(patterns),freeze(motifs),
+                     freeze(glyphs),freeze(art),freeze(art_styles),freeze(art_cell_styles),freeze(patterns),freeze(motifs),
                      freeze(masks),freeze(layers),freeze(rules),freeze(animations),freeze(variants),
                      freeze(normalized_fallbacks),seed,seed_mode,fps)
 
@@ -1303,6 +1341,21 @@ def pattern_sample(spec: Mapping[str,Any], x: int, y: int, w: int, h: int, seed:
     elif kind=='brackets': visible=x%px in (0,px-1) and y%py not in (py//2,) or y%py in (0,py-1) and x%px<2
     elif kind=='connectors': visible=y%py==py//2 or x%px==px//2; index=(x%px==px//2)%len(symbols)
     return (symbols[index] if visible else ' ',value)
+
+
+def frame_axis(position: int, destination: int, source: int,
+               before: int, after: int, source_before: int, source_after: int) -> int:
+    """Nine-slice sampling: preserve corner identity while edges span a frame."""
+    position=max(0,min(max(0,destination-1),position))
+    before=min(before,destination)
+    after=min(after,max(0,destination-before))
+    if position<before and source_before:
+        return min(source_before-1,position*source_before//max(1,before))
+    if position>=destination-after and after and source_after:
+        return source-source_after+min(source_after-1,(position-destination+after)*source_after//after)
+    center=max(1,destination-before-after)
+    span=source-source_before-source_after
+    return max(0,min(source-1,source_before+(position-before)*span//center))
 
 
 class ThemePainter:
@@ -1402,6 +1455,7 @@ class ThemePainter:
                 art=self.theme.art[source['art']]
                 aw,ah=len(art[0]),len(art)
                 source_style=self.theme.art_styles[source['art']]
+                cell_styles=self.theme.art_cell_styles.get(source['art'])
             else:
                 pattern=self.theme.patterns[source['pattern']]
                 aw,ah=pattern['period']; source_style=pattern['style']
@@ -1411,24 +1465,47 @@ class ThemePainter:
                 ramp=[c for k,c in self.theme.palette.items() if re.search(r'\.\d+$',k)]
                 if ramp: ink=replace(ink,fg=ramp[palette_phase%len(ramp)])
             mask=self.theme.masks.get(props.get('mask',''))
+            fitted = props['fit']=='frame'
+            if fitted:
+                if slot=='outer':
+                    frame=Rect(0,min(1,canvas.height),canvas.width,max(0,canvas.height-2))
+                    bands=geometry.margins
+                elif slot.startswith('tile.'):
+                    frame=geometry.tiles.get(Tile(slot.split('.')[1]))
+                    bands=(geometry.band+1,)*4
+                    if frame is None: continue
+                else:
+                    parts=geometry.slots.get(slot,())
+                    if not parts: continue
+                    left,top=min(p.x for p in parts),min(p.y for p in parts)
+                    frame=Rect(left,top,max(p.right for p in parts)-left,max(p.bottom for p in parts)-top)
+                    bands=(0,0,0,0)
+                st,sr,sb,sl=props['frame_insets']
             for rect in geometry.slots.get(slot,()):
                 r=rect.intersect(canvas.bounds)
+                if fitted:
+                    xs=[frame_axis(x-frame.x,frame.w,aw,bands[3],bands[1],sl,sr) for x in range(r.x,r.right)]
+                    ys=[frame_axis(y-frame.y,frame.h,ah,bands[0],bands[2],st,sb) for y in range(r.y,r.bottom)]
                 for y in range(r.y,r.bottom):
                     if canvas.operations>=canvas.budget: break
                     for x in range(r.x,r.right):
                         if canvas.operations>=canvas.budget: break
                         canvas.operations+=1
                         lx,ly=x-rect.x-props['offset'][0],y-rect.y-props['offset'][1]
-                        if not props['repeat'] and not (0<=lx<aw and 0<=ly<ah): continue
+                        if not fitted and not props['repeat'] and not (0<=lx<aw and 0<=ly<ah): continue
                         if 'art' in source:
-                            tx,ty=lx%(aw+gap[0]),ly%(ah+gap[1])
+                            tx,ty=(xs[x-r.x],ys[y-r.y]) if fitted else (lx%(aw+gap[0]),ly%(ah+gap[1]))
                             if tx>=aw or ty>=ah: continue
                             if props['transform']=='mirror': tx=aw-1-tx
                             if props['transform']=='rotate90':
                                 # Rotation is clipped to the source extent, not a functional layout mutation.
                                 tx,ty=ty%aw,ah-1-(tx%ah)
                             glyph=art[ty][tx]
+                            cell_ink=styles[cell_styles[ty][tx]] if cell_styles and not props.get('style') else ink
+                            if cell_styles and palette_phase:
+                                cell_ink=replace(cell_ink,fg=ink.fg)
                         else:
+                            cell_ink=ink
                             glyph,_=pattern_sample(pattern,lx,ly,rect.w,rect.h,seed,
                                                    props.get('phase',0),props.get('density'))
                             if 'glyph_frame' in props and glyph!=' ':
@@ -1443,7 +1520,7 @@ class ThemePainter:
                             glyph=mapping.get(glyph,' ')
                         if not ctx.unicode and any(ord(c)>126 for c in glyph): glyph=ascii_glyph
                         canvas.operations-=1
-                        canvas.put(x,y,glyph,ink,0,props['mode'],props['opacity'],seed)
+                        canvas.put(x,y,glyph,cell_ink,0,props['mode'],props['opacity'],seed)
         return styles
 
 # =============================================================================
@@ -1550,12 +1627,17 @@ def solve_geometry(width: int, height: int, state: LayoutState, config: Config,
                   Rect(outer_workspace.right-spacer,outer_workspace.y,spacer,outer_workspace.h)),
     }
     decor_dividers=[]
+    vertical_dividers=[]
+    horizontal_dividers=[]
     for axis,r in dividers.items():
         if axis=='left_ratio':
-            decor_dividers.extend((Rect(r.x-divider_band,r.y,divider_band,r.h),Rect(r.right,r.y,divider_band,r.h)))
+            vertical_dividers.extend((Rect(r.x-divider_band,r.y,divider_band,r.h),Rect(r.right,r.y,divider_band,r.h)))
         else:
-            decor_dividers.extend((Rect(r.x,r.y-divider_band,r.w,divider_band),Rect(r.x,r.bottom,r.w,divider_band)))
+            horizontal_dividers.extend((Rect(r.x,r.y-divider_band,r.w,divider_band),Rect(r.x,r.bottom,r.w,divider_band)))
+    decor_dividers=vertical_dividers+horizontal_dividers
     slots['divider']=tuple(decor_dividers)
+    slots['divider.vertical']=tuple(vertical_dividers)
+    slots['divider.horizontal']=tuple(horizontal_dividers)
     for tile,r in tiles.items():
         b=1+border
         slots[f'tile.{tile.value}.chrome']=(Rect(r.x,r.y,r.w,b),Rect(r.x,r.bottom-b,r.w,b),

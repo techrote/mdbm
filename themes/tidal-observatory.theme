@@ -1,0 +1,300 @@
+# Standalone theme. Decorative layers never control workspace behavior.
+schema = "md-editor-theme/1.1"
+id = "tidal-observatory"
+name = "Tidal Observatory"
+description = "A deep-ocean instrument desk: sea-glass text, turquoise current lines, coral buoys and measured wave motion."
+seed = 7414
+seed_mode = "fixed"
+fps = 8
+
+[palette]
+paper = "#081c29"
+ink = "#d7ecec"
+muted = "#8aabb5"
+frame = "#365c70"
+accent = "#77e3d4"
+code = "#e9c48b"
+link = "#84cfff"
+secondary = "#f0a59b"
+decoration = "#204555"
+warning = "#edc777"
+error = "#ff9f9b"
+heading = "#77e3d4"
+success = "#84cfff"
+
+[geometry]
+outer = [0, 0, 0, 0]
+border = 1
+divider = 1
+spacer = 0
+# Uses the configured outer margin; small layouts are clamped by the host.
+
+[styles.background]
+fg = "ink"
+bg = "paper"
+
+[styles.text]
+fg = "ink"
+bg = "paper"
+
+[styles.muted]
+fg = "muted"
+bg = "paper"
+
+[styles.border]
+fg = "frame"
+bg = "paper"
+
+[styles.title]
+fg = "accent"
+bg = "paper"
+bold = true
+
+[styles.accent]
+fg = "accent"
+bg = "paper"
+
+[styles.code]
+fg = "code"
+bg = "paper"
+
+[styles.heading]
+fg = "heading"
+bg = "paper"
+bold = true
+
+[styles.link]
+fg = "link"
+bg = "paper"
+underline = true
+
+[styles.quote]
+fg = "secondary"
+bg = "paper"
+italic = true
+
+[styles.table]
+fg = "ink"
+bg = "paper"
+
+[styles.diagnostic]
+fg = "warning"
+bg = "paper"
+
+[styles.tree]
+fg = "ink"
+bg = "paper"
+
+[styles.gutter]
+fg = "muted"
+bg = "paper"
+
+[styles.status]
+fg = "muted"
+bg = "paper"
+
+[styles.keyword]
+fg = "accent"
+bg = "paper"
+bold = true
+
+[styles.string]
+fg = "secondary"
+bg = "paper"
+
+[styles.number]
+fg = "code"
+bg = "paper"
+
+[styles.comment]
+fg = "muted"
+bg = "paper"
+italic = true
+
+[styles.draft]
+fg = "decoration"
+bg = "paper"
+
+[styles.ornament]
+fg = "frame"
+bg = "paper"
+
+[styles.jewel]
+fg = "secondary"
+bg = "paper"
+
+[styles.active-rail]
+fg = "accent"
+bg = "paper"
+bold = true
+
+[styles.saved]
+fg = "success"
+bg = "paper"
+
+[styles.attention]
+fg = "warning"
+bg = "paper"
+
+[styles.fault]
+fg = "error"
+bg = "paper"
+
+# Unique border module, repeated only in the outer decorative margin.
+[art.signature]
+rows = ["    .    ", "---(+)---", "    |    "]
+style = "ornament"
+
+[motifs.signature]
+art = "signature"
+gap = [10, 3]
+
+[patterns.structure]
+kind = "bands"
+glyphs = ["~", "-", "."]
+period = [15, 5]
+style = "draft"
+density = 0.25
+
+[patterns.detail]
+kind = "scatter"
+glyphs = [".", "o"]
+period = [17, 7]
+style = "jewel"
+density = 0.045
+
+[patterns.rails]
+kind = "rails"
+glyphs = ["|", "-"]
+period = [11, 4]
+style = "ornament"
+density = 0.12
+
+[patterns.paper-grain]
+kind = "grid"
+glyphs = ["."]
+period = [19, 7]
+style = "draft"
+density = 0.06
+
+[[layers]]
+id = "structure"
+slot = "outer"
+pattern = "structure"
+mode = "transparent-cell"
+
+[[layers]]
+id = "signature"
+slot = "outer"
+motif = "signature"
+mode = "transparent-cell"
+
+[[layers]]
+id = "detail"
+slot = "outer"
+pattern = "detail"
+mode = "transparent-cell"
+
+[[layers]]
+id = "divider"
+slot = "divider"
+pattern = "rails"
+mode = "transparent-cell"
+
+[[layers]]
+id = "edit-rail"
+slot = "tile.edit.chrome"
+pattern = "rails"
+mode = "transparent-cell"
+
+[[layers]]
+id = "view-rail"
+slot = "tile.view.chrome"
+pattern = "rails"
+mode = "transparent-cell"
+
+[[layers]]
+id = "filesystem-rail"
+slot = "tile.filesystem.chrome"
+pattern = "rails"
+mode = "transparent-cell"
+
+[[layers]]
+id = "contents-rail"
+slot = "tile.contents.chrome"
+pattern = "rails"
+mode = "transparent-cell"
+
+[[layers]]
+id = "immersive-grain"
+slot = "behind-content"
+pattern = "paper-grain"
+mode = "underlay"
+
+# Focus and save cues affect decoration only; host controls stay protected.
+[[rules]]
+target = "layer.edit-rail"
+states = ["focused"]
+set = { style = "active-rail" }
+
+[[rules]]
+target = "layer.view-rail"
+states = ["focused"]
+set = { style = "active-rail" }
+
+[[rules]]
+target = "layer.filesystem-rail"
+states = ["focused"]
+set = { style = "active-rail" }
+
+[[rules]]
+target = "layer.contents-rail"
+states = ["focused"]
+set = { style = "active-rail" }
+
+[[rules]]
+target = "layer.edit-rail"
+states = ["dirty"]
+set = { style = "attention" }
+
+[[rules]]
+target = "layer.detail"
+cue = "save-success"
+set = { style = "saved", density = 0.10 }
+
+[[rules]]
+target = "layer.edit-rail"
+cue = "save-failure"
+set = { style = "fault" }
+
+# Slow spatial movement; no flashing or whole-palette cycling.
+[[animations]]
+id = "margin-drift"
+target = "layer.detail"
+property = "offset"
+values = [[0,0], [1,0], [2,1], [1,1], [0,0]]
+duration = 18.0
+loop = true
+
+[[variants]]
+when = { max_width = 90 }
+hide_layers = ["signature"]
+
+[[variants]]
+when = { high_contrast = true }
+hide_layers = ["structure", "signature", "detail", "immersive-grain"]
+
+[fallbacks.ascii]
+glyph = "."
+
+[fallbacks.monochrome]
+glyph = "."
+hide_layers = ["detail", "immersive-grain"]
+
+[fallbacks.narrow]
+glyph = "."
+hide_layers = ["structure", "signature", "detail", "immersive-grain"]
+
+[fallbacks.reduced_motion]
+glyph = "."
+# The host disables all animation tracks in reduced/off motion.

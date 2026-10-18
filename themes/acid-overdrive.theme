@@ -1,0 +1,464 @@
+# Original ANSI/NFO-inspired cell art; no terminal escape payloads.
+schema = "md-editor-theme/1.1"
+id = "acid-overdrive"
+name = "Acid Overdrive"
+description = "Contaminated green machinery: extruded lime type, hazard hatching, corroded coolant ducts and amber instrument ticks."
+seed = 92995
+seed_mode = "fixed"
+fps = 6
+
+[palette]
+paper = "#10150b"
+ink = "#e0e9cf"
+muted = "#a6b28c"
+frame = "#5b6d37"
+accent = "#c7ed62"
+code = "#e5d582"
+link = "#8cd3b5"
+secondary = "#e8ac55"
+shadow = "#050802"
+grime = "#263317"
+metal = "#7b9841"
+highlight = "#f0ffb0"
+heading = "#c7ed62"
+warning = "#e5b96e"
+error = "#ff938d"
+success = "#8cd3b5"
+
+# With the default four-cell margin, this reserves ten rows for the masthead.
+[geometry]
+outer = [6, 1, 0, 1]
+border = 1
+divider = 1
+spacer = 0
+
+[styles.background]
+fg = "ink"
+bg = "paper"
+
+[styles.text]
+fg = "ink"
+bg = "paper"
+
+[styles.muted]
+fg = "muted"
+bg = "paper"
+
+[styles.border]
+fg = "frame"
+bg = "paper"
+
+[styles.title]
+fg = "accent"
+bg = "paper"
+bold = true
+
+[styles.accent]
+fg = "accent"
+bg = "paper"
+
+[styles.code]
+fg = "code"
+bg = "paper"
+
+[styles.heading]
+fg = "heading"
+bg = "paper"
+bold = true
+
+[styles.link]
+fg = "link"
+bg = "paper"
+underline = true
+
+[styles.quote]
+fg = "secondary"
+bg = "paper"
+italic = true
+
+[styles.table]
+fg = "ink"
+bg = "paper"
+
+[styles.diagnostic]
+fg = "warning"
+bg = "paper"
+
+[styles.tree]
+fg = "ink"
+bg = "paper"
+
+[styles.gutter]
+fg = "muted"
+bg = "paper"
+
+[styles.status]
+fg = "muted"
+bg = "paper"
+
+[styles.keyword]
+fg = "accent"
+bg = "paper"
+bold = true
+
+[styles.string]
+fg = "link"
+bg = "paper"
+
+[styles.number]
+fg = "code"
+bg = "paper"
+
+[styles.comment]
+fg = "muted"
+bg = "paper"
+italic = true
+
+[styles.grime]
+fg = "grime"
+bg = "paper"
+
+[styles.metal]
+fg = "metal"
+bg = "paper"
+
+[styles.shadow]
+fg = "shadow"
+bg = "paper"
+
+[styles.face]
+fg = "accent"
+bg = "paper"
+bold = true
+
+[styles.shine]
+fg = "highlight"
+bg = "paper"
+bold = true
+
+[styles.edge]
+fg = "frame"
+bg = "paper"
+
+[styles.ghost]
+fg = "secondary"
+bg = "paper"
+
+[styles.active-rail]
+fg = "accent"
+bg = "paper"
+bold = true
+
+[styles.saved]
+fg = "success"
+bg = "paper"
+
+[styles.attention]
+fg = "warning"
+bg = "paper"
+
+[styles.fault]
+fg = "error"
+bg = "paper"
+
+[art.logo-solid]
+rows = ["  \u2588\u2588\u2588\u2588\u2588\u2588      \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588  ", "\u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588            \u2588\u2588      \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588", "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588            \u2588\u2588      \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588", "\u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588            \u2588\u2588      \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588", "\u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588    \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588  "]
+style = "shadow"
+
+[art.logo-face]
+rows = ["  \u2580\u2580\u2580\u2580\u2580\u2580      \u2580\u2580\u2580\u2580\u2580\u2580\u2580\u2580  \u2580\u2580\u2580\u2580\u2580\u2580\u2580\u2580\u2580\u2580  \u2580\u2580\u2580\u2580\u2580\u2580\u2580\u2580  ", "\u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588            \u2588\u2588      \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588", "\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588            \u2588\u2588      \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588", "\u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588            \u2588\u2588      \u2588\u2588\u2588\u2588  \u2588\u2588\u2588\u2588", "\u2593\u2593\u2593\u2593  \u2593\u2593\u2593\u2593    \u2593\u2593\u2593\u2593\u2593\u2593\u2593\u2593  \u2593\u2593\u2593\u2593\u2593\u2593\u2593\u2593\u2593\u2593  \u2593\u2593\u2593\u2593\u2593\u2593\u2593\u2593  "]
+style = "face"
+
+[art.logo-glint]
+rows = ["  \u2580\u2580\u2580\u2580\u2580\u2580      \u2580\u2580\u2580\u2580\u2580\u2580\u2580\u2580  \u2580\u2580\u2580\u2580\u2580\u2580\u2580\u2580\u2580\u2580  \u2580\u2580\u2580\u2580\u2580\u2580\u2580\u2580  ", "\u2580\u2580      \u2580\u2580  \u2580\u2580                              \u2580\u2580", "    \u2580\u2580                                        ", "                                              ", "                \u2580\u2580\u2580\u2580\u2580\u2580  \u2580\u2580\u2580\u2580  \u2580\u2580\u2580\u2580      \u2580\u2580    "]
+style = "shine"
+
+[art.logo-wear]
+rows = ["                            \u2591                 ", "\u2591                                    \u2591        ", "         \u2591                                    ", "                                              ", "                           \u2591                  "]
+style = "edge"
+
+[art.side-module]
+rows = ["/\u2580\u2580\u2580\u2580\\", "\u2588[==]\u2588", "\u2588|::|\u2588", "\u2588[==]\u2588", "\\\u2584\u2584\u2584\u2584/"]
+style = "metal"
+
+[art.release-strip]
+rows = ["// ACID :: MDBM . NFO / CELLWORKS 03 //"]
+style = "ghost"
+
+[art.rivets]
+rows = ["o===========o", "|           |", "+-----------+"]
+style = "edge"
+
+[patterns.ground]
+kind = "hatch"
+glyphs = ["\u2593", "\u2592", "\u2591"]
+period = [7, 4]
+style = "grime"
+density = 0.28
+
+[patterns.pits]
+kind = "scatter"
+glyphs = [".", ":", "\u2591"]
+period = [17, 7]
+style = "metal"
+density = 0.09
+
+[patterns.chips]
+kind = "fragmentation"
+glyphs = ["\u2593", "\u2591", "/"]
+period = [3, 2]
+style = "edge"
+density = 0.1
+
+[patterns.beam]
+kind = "tile"
+glyphs = ["\u2588", "\u2593", "\u2592", "\u2591"]
+period = [4, 1]
+style = "metal"
+density = 1.0
+
+[patterns.stitches]
+kind = "rails"
+glyphs = ["="]
+period = [12, 4]
+style = "edge"
+density = 0.1
+
+[patterns.dust]
+kind = "scatter"
+glyphs = [".", ":", "+"]
+period = [19, 7]
+style = "ghost"
+density = 0.024
+
+[patterns.scars]
+kind = "hatch"
+glyphs = ["/"]
+period = [23, 5]
+style = "edge"
+density = 0.1
+
+[motifs.side-module]
+art = "side-module"
+gap = [23, 3]
+
+[motifs.rivets]
+art = "rivets"
+gap = [19, 5]
+
+[[layers]]
+id = "ground"
+slot = "outer"
+pattern = "ground"
+mode = "transparent-cell"
+
+[[layers]]
+id = "pits"
+slot = "outer"
+pattern = "pits"
+mode = "transparent-cell"
+
+[[layers]]
+id = "module-shadow"
+slot = "outer"
+motif = "side-module"
+mode = "transparent-cell"
+style = "shadow"
+offset = [1, 1]
+
+[[layers]]
+id = "modules"
+slot = "outer"
+motif = "side-module"
+mode = "transparent-cell"
+offset = [0, 0]
+
+[[layers]]
+id = "rivets"
+slot = "outer"
+motif = "rivets"
+mode = "transparent-cell"
+offset = [3, 0]
+
+[[layers]]
+id = "chips"
+slot = "outer"
+pattern = "chips"
+mode = "transparent-cell"
+
+[[layers]]
+id = "logo-shadow"
+slot = "outer"
+art = "logo-solid"
+mode = "transparent-cell"
+style = "shadow"
+offset = [13, 5]
+repeat = false
+
+[[layers]]
+id = "logo-extrude"
+slot = "outer"
+art = "logo-solid"
+mode = "transparent-cell"
+style = "metal"
+offset = [12, 5]
+repeat = false
+
+[[layers]]
+id = "logo-face"
+slot = "outer"
+art = "logo-face"
+mode = "transparent-cell"
+offset = [10, 4]
+repeat = false
+
+[[layers]]
+id = "logo-glint"
+slot = "outer"
+art = "logo-glint"
+mode = "transparent-cell"
+offset = [10, 4]
+repeat = false
+
+[[layers]]
+id = "logo-wear"
+slot = "outer"
+art = "logo-wear"
+mode = "transparent-cell"
+offset = [10, 4]
+repeat = false
+
+[[layers]]
+id = "release-strip"
+slot = "outer"
+art = "release-strip"
+mode = "transparent-cell"
+offset = [10, 1]
+repeat = false
+
+[[layers]]
+id = "dust"
+slot = "outer"
+pattern = "dust"
+mode = "transparent-cell"
+
+[[layers]]
+id = "divider"
+slot = "divider"
+pattern = "beam"
+mode = "transparent-cell"
+
+[[layers]]
+id = "edit-beam"
+slot = "tile.edit.chrome"
+pattern = "beam"
+mode = "transparent-cell"
+
+[[layers]]
+id = "edit-scars"
+slot = "tile.edit.chrome"
+pattern = "scars"
+mode = "transparent-cell"
+
+[[layers]]
+id = "view-beam"
+slot = "tile.view.chrome"
+pattern = "beam"
+mode = "transparent-cell"
+
+[[layers]]
+id = "view-scars"
+slot = "tile.view.chrome"
+pattern = "scars"
+mode = "transparent-cell"
+
+[[layers]]
+id = "filesystem-beam"
+slot = "tile.filesystem.chrome"
+pattern = "beam"
+mode = "transparent-cell"
+
+[[layers]]
+id = "filesystem-scars"
+slot = "tile.filesystem.chrome"
+pattern = "scars"
+mode = "transparent-cell"
+
+[[layers]]
+id = "contents-beam"
+slot = "tile.contents.chrome"
+pattern = "beam"
+mode = "transparent-cell"
+
+[[layers]]
+id = "contents-scars"
+slot = "tile.contents.chrome"
+pattern = "scars"
+mode = "transparent-cell"
+
+[[rules]]
+target = "layer.edit-scars"
+states = ["focused"]
+set = { style = "active-rail" }
+
+[[rules]]
+target = "layer.view-scars"
+states = ["focused"]
+set = { style = "active-rail" }
+
+[[rules]]
+target = "layer.filesystem-scars"
+states = ["focused"]
+set = { style = "active-rail" }
+
+[[rules]]
+target = "layer.contents-scars"
+states = ["focused"]
+set = { style = "active-rail" }
+
+[[rules]]
+target = "layer.edit-scars"
+states = ["dirty"]
+set = { style = "attention" }
+
+[[rules]]
+target = "layer.dust"
+cue = "save-success"
+set = { style = "saved", density = 0.08 }
+
+[[rules]]
+target = "layer.edit-scars"
+cue = "save-failure"
+set = { style = "fault" }
+
+# Only sparse dust moves; masthead, bevels and texture remain stable.
+[[animations]]
+id = "dust-drift"
+target = "layer.dust"
+property = "offset"
+values = [[0,0], [1,0], [2,1], [3,1], [2,0], [1,0]]
+duration = 16.0
+loop = true
+
+[[variants]]
+when = { max_width = 89 }
+hide_layers = ["logo-shadow", "logo-extrude", "logo-face", "logo-glint", "logo-wear", "release-strip"]
+
+[[variants]]
+when = { high_contrast = true }
+hide_layers = ["logo-shadow", "logo-extrude", "logo-face", "logo-glint", "logo-wear", "release-strip", "ground", "pits", "module-shadow", "modules", "rivets", "chips", "dust"]
+
+[fallbacks.ascii]
+glyph = "#"
+hide_layers = ["logo-glint", "logo-wear"]
+
+[fallbacks.monochrome]
+glyph = "#"
+hide_layers = ["logo-shadow", "logo-extrude", "pits", "chips", "dust"]
+
+[fallbacks.narrow]
+glyph = "."
+hide_layers = ["logo-shadow", "logo-extrude", "logo-face", "logo-glint", "logo-wear", "release-strip", "ground", "pits", "module-shadow", "modules", "rivets", "chips", "dust"]
+
+[fallbacks.reduced_motion]
+glyph = "."

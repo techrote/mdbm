@@ -20,10 +20,37 @@ Geometry accepts `outer` [top,right,bottom,left], `border`, `divider`, `spacer`,
 
 Layers target `outer`, `divider`, `spacer`, `tile.filesystem.chrome`, `tile.contents.chrome`, `tile.edit.chrome`, `tile.view.chrome`, or `behind-content`. The last is ignored without explicit immersive permission. Slots are decorative masks owned by the host. `layer.<id>` is the only rule/track target grammar; a target is not an object reference.
 
+`divider.vertical` and `divider.horizontal` expose the same decorative divider
+cells by orientation. They exclude the host-owned one-cell drag handle. Existing
+`divider` layers keep their original behavior.
+
+### Geometry-fitted material frames
+
+An art record may include `style_grid`: one space-separated row of style IDs for
+each decoded glyph row. Both grids must have exactly the same dimensions. Every
+style reference is validated; style cells share the 262,144-cell decoded-art
+budget. The grid supplies per-cell foreground/background styles. A layer's
+explicit `style` or a style rule overrides the grid for that layer.
+
+Direct art layers may set `fit = "frame"` and `frame_insets = [top,right,bottom,left]`.
+These source-image bands leave a nonempty center and use nine-slice sampling:
+corners retain their identity and the central edge sections span the destination.
+The destination is the complete outer frame, the complete tile rectangle, or
+both decorative strips of an oriented divider together. Sampling never expands
+the host's decorative mask. Outer bands track the solved margins; tile bands
+track the solved chrome thickness. Oriented dividers use a continuous stretch
+across both strips, so lighting does not restart beside the drag handle.
+
+Frame fitting supports `outer`, the four tile-chrome slots, and the two oriented
+divider slots. It does not support patterns, motifs, transforms, offsets, offset
+rules or offset animations. The optional fields are strictly validated. Ordinary
+art without `fit` or `style_grid` keeps its original sampling and style behavior.
+Themes using these additions require the updated renderer from this checkout.
+
 ## Object vocabulary
 
 - `glyphs.<id>`: `symbols` list of single-cell graphemes; optional complete `mirror` and `rotate90` maps. Transformations require explicit maps, never guessed Unicode substitutions.
-- `art.<id>`: either `rows` of literal glyph strings, or `grid` rows of space-separated token names, or `rle` rows of `count:token` runs. `legend` maps token IDs to literal single-cell glyphs. Optional `style`. Exactly one representation. Decoded dimensions and total cells are bounded before allocation.
+- `art.<id>`: either `rows` of literal glyph strings, or `grid` rows of space-separated token names, or `rle` rows of `count:token` runs. `legend` maps token IDs to literal single-cell glyphs. Optional `style` and `style_grid`. Exactly one glyph representation. Decoded dimensions and total cells are bounded before allocation.
 - `patterns.<id>`: `kind`, `glyphs`, `style`, `period` [x,y], `density` 0–1, `phase`, `amplitude`. Built-ins: tile, stripe, checker, hatch, grid, scanline, dither, scatter, noise, vignette, bands, dropout, slice-displacement, fragmentation, colour-channel-offset, rails, ladders, stepped-path, brackets, connectors. Evaluation is deterministic and clipped to the slot.
 - `motifs.<id>`: an `art` or `pattern` reference, plus optional `gap` [x,y]. This is a reusable repeat module.
 - `masks.<id>`: `pattern` reference, `threshold` 0–1 and optional `invert` boolean. Mask objects cannot read content or protected pixels.

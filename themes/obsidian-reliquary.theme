@@ -1,0 +1,603 @@
+# Original hand-drawn ASCII relief. Lighting: upper left; depth: down/right.
+# No block glyphs, random face textures, animation, or executable content.
+schema = "md-editor-theme/1.1"
+id = "obsidian-reliquary"
+name = "Obsidian Reliquary"
+description = "A carved obsidian shrine: pointed vaults, receding archivolts, fluted pilasters and an engraved VOID seal."
+seed = 24119
+seed_mode = "fixed"
+fps = 6
+
+[palette]
+paper = "#100d19"
+ink = "#e4dcef"
+muted = "#a699b9"
+frame = "#625276"
+accent = "#c0a0f0"
+code = "#e2bd8a"
+link = "#a6cbdc"
+secondary = "#c481b3"
+shadow = "#05040a"
+grime = "#292037"
+metal = "#75618e"
+highlight = "#f0e0ff"
+heading = "#c0a0f0"
+warning = "#e5b96e"
+error = "#ff938d"
+success = "#a6cbdc"
+cavity = "#574569"
+side = "#9d88b6"
+face = "#75618e"
+light = "#f0e0ff"
+
+[geometry]
+# Eight requested rows + four default user rows = twelve for the sculpture.
+outer = [8, 2, 0, 2]
+border = 1
+divider = 1
+spacer = 0
+
+[styles.background]
+fg = "ink"
+bg = "paper"
+
+[styles.text]
+fg = "ink"
+bg = "paper"
+
+[styles.muted]
+fg = "muted"
+bg = "paper"
+
+[styles.border]
+fg = "frame"
+bg = "paper"
+
+[styles.title]
+fg = "accent"
+bg = "paper"
+bold = true
+
+[styles.accent]
+fg = "accent"
+bg = "paper"
+
+[styles.code]
+fg = "code"
+bg = "paper"
+
+[styles.heading]
+fg = "heading"
+bg = "paper"
+bold = true
+
+[styles.link]
+fg = "link"
+bg = "paper"
+underline = true
+
+[styles.quote]
+fg = "secondary"
+bg = "paper"
+italic = true
+
+[styles.table]
+fg = "ink"
+bg = "paper"
+
+[styles.diagnostic]
+fg = "warning"
+bg = "paper"
+
+[styles.tree]
+fg = "ink"
+bg = "paper"
+
+[styles.gutter]
+fg = "muted"
+bg = "paper"
+
+[styles.status]
+fg = "muted"
+bg = "paper"
+
+[styles.keyword]
+fg = "accent"
+bg = "paper"
+bold = true
+
+[styles.string]
+fg = "link"
+bg = "paper"
+
+[styles.number]
+fg = "code"
+bg = "paper"
+
+[styles.comment]
+fg = "muted"
+bg = "paper"
+italic = true
+
+[styles.relief-outline]
+fg = "side"
+bg = "paper"
+
+[styles.relief-light]
+fg = "light"
+bg = "paper"
+
+[styles.relief-face]
+fg = "accent"
+bg = "paper"
+
+[styles.relief-hatch]
+fg = "face"
+bg = "paper"
+
+[styles.relief-cavity]
+fg = "cavity"
+bg = "paper"
+
+[styles.relief-shadow]
+fg = "shadow"
+bg = "paper"
+
+[styles.registration]
+fg = "frame"
+bg = "paper"
+
+[styles.active]
+fg = "accent"
+bg = "paper"
+
+[styles.attention]
+fg = "warning"
+bg = "paper"
+
+[styles.saved]
+fg = "success"
+bg = "paper"
+
+[styles.fault]
+fg = "error"
+bg = "paper"
+
+[art.hero-outline]
+rows = ["            \\                               \\                               \\                             ", "             \\\\                              \\\\                              \\\\                   \\  \\    ", "            \\ \\\\                      |     \\ \\\\ |\\                \\        \\ \\\\                     \\    ", "          +  +\\ \\\\  |                     +  +\\ \\\\                   |      +  +\\ \\\\          | |  \\ | |\\ ", "         |    |\\ \\\\ |  \\ \\         \\ | | |   | | |     \\ |   \\ |  \\ |     |    |\\ \\\\         | |<  >| | | ", "         |    | \\ \\\\|   \\     | | | || | |   | | |  | |  | | \\ \\| | ||     |    | \\ \\\\        | | \\  | | |", "         |    |  \\  \\    \\     \\     | | |   | | | |   | | |    | | |     |    |  \\  \\       | |    | |   ", "   |  |       \\  |  |                |       \\ \\ |       |            |  |       \\  |  |       |       \\| "]
+style = "relief-outline"
+
+[art.hero-light]
+rows = ["           /                               /                               /                      ----    ", "         //           _________________  //      _________________       //                    / /  /     ", "        // /        /________________/  // /       ________________     // /                 /_/__ __     ", "      // / --          __   __  ___   // / --        ___   ___   __     // / --                   /       ", "     // /                  / / / _                 /_ _    _          // /                                ", "    // /                    /    _                                    // /                         /      ", "   /__/   ____    __      _/    ___/    _ ___ _     ___     _/ / _ _ /__/  ____    __           ____    / ", "    __   /        __ ________________ _/_/___ _ _ _______ ___/________ __   /        __         /______  /"]
+style = "relief-light"
+
+[art.hero-cavity]
+rows = ["                                                                                                          ", "                                                                                                          ", "                                                                                                          ", "                                                                                                          ", "                                                                                                       #  ", "                                                                                                        # ", "                                                                                                       #  ", "          %%%%                                                               %%%%                         "]
+style = "relief-cavity"
+
+[art.hero-hatch]
+rows = ["                                                                                                 .    .   ", "                                                                                                          ", "       .        .                      .        .                      .        .                         ", "                                                                                               :      :   ", "           .                          :   .   :                              .                :      :    ", "        : .    :               :   :  :       :      :    :      :        :    . :             :      :   ", "       ::      ::                     :         :       :                :      ::            :      :    ", "       ::      ::                                                         ::      ::                      "]
+style = "relief-hatch"
+
+[art.hero-face]
+rows = ["                                                                                                          ", "                                                                                                          ", "                                                                                                  V       ", "                                                                                                          ", "                                                                                                          ", "                          V                                                                               ", "                                                                                                          ", "                                                                                                          "]
+style = "relief-face"
+
+[art.hero-shadow]
+rows = ["           /\\                              /\\                              /\\                     ----    ", "         //  \\\\       _________________  //  \\\\  _________________       //  \\\\                / /\\ /\\    ", "        // /\\ \\\\    /________________/| // /\\ \\\\ |\\________________\\    // /\\ \\\\             /_/__ __\\    ", "      // / -- \\ \\\\  |  __   __  ___   // / -- \\ \\\\   ___   ___   __  |  // / -- \\ \\\\          | | /\\ | |\\ ", "     // /|    |\\ \\\\ |  \\ \\ / / / _ \\ | | |   | | | /_ _\\ | _ \\ |  \\ | // /|    |\\ \\\\         | |    | | | ", "    // / |    | \\ \\\\|   \\   / | |_| || | |   | | |  | |  | | \\ \\| | ||// / |    | \\ \\\\        | | \\/ | | |", "   /__/  |____|  \\__\\    \\_/   \\___/ | |_|___|_| | |___| | |_/ /|_|_|/__/ |____|  \\__\\       | |____| | / ", "   |__|  /    \\  |__|________________|_/_/___\\_\\_|_______|___/________|__|  /    \\  |__|       |/______\\|/"]
+style = "relief-shadow"
+
+[art.pier-outline]
+rows = ["   \\  ", "  ++\\ ", " |  |\\", "||  ||", "||  ||", "|   \\|", "|    |", " \\    "]
+style = "relief-outline"
+
+[art.pier-light]
+rows = ["  /   ", " /    ", "/     ", "      ", "      ", " /    ", " ==== ", "    / "]
+style = "relief-light"
+
+[art.pier-cavity]
+rows = ["      ", "      ", "      ", "      ", "      ", "  %%  ", "      ", "  ##  "]
+style = "relief-cavity"
+
+[art.pier-hatch]
+rows = ["      ", "      ", "  ..  ", "      ", "      ", "      ", "      ", "      "]
+style = "relief-hatch"
+
+[art.pier-face]
+rows = ["      ", "      ", "      ", "      ", "      ", "      ", "      ", "      "]
+style = "relief-face"
+
+[art.pier-shadow]
+rows = ["  /\\  ", " /  \\ ", "/|  |\\", "||  ||", "||  ||", "|/  \\|", "|    |", " \\  / "]
+style = "relief-shadow"
+
+[art.molding-outline]
+rows = ["  \\       \\       \\   ", " ++\\     ++\\     ++\\  ", "|  |    |  |    |  |  "]
+style = "relief-outline"
+
+[art.molding-light]
+rows = [" /       /       /    ", "/   ____/   ____/   __", "                      "]
+style = "relief-light"
+
+[art.molding-cavity]
+rows = ["                      ", "                      ", "    %%%%    %%%%    %%"]
+style = "relief-cavity"
+
+[art.molding-hatch]
+rows = ["                      ", "                      ", " ::      ::      ::   "]
+style = "relief-hatch"
+
+[art.molding-face]
+rows = ["                      ", "                      ", "                      "]
+style = "relief-face"
+
+[art.molding-shadow]
+rows = [" /\\      /\\      /\\   ", "/  \\____/  \\____/  \\__", "|  |    |  |    |  |  "]
+style = "relief-shadow"
+
+[art.maker-mark]
+rows = [":: OBSIDIAN RELIQUARY / SCULPTED ASCII / MDBM ::"]
+style = "registration"
+
+[patterns.patina]
+kind = "scatter"
+glyphs = [".", ",", ":"]
+period = [29, 11]
+density = 0.018
+style = "relief-cavity"
+
+[[layers]]
+id = "patina"
+slot = "outer"
+pattern = "patina"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[motifs.pier-outline]
+art = "pier-outline"
+gap = [129, 3]
+
+[motifs.pier-light]
+art = "pier-light"
+gap = [129, 3]
+
+[motifs.pier-cavity]
+art = "pier-cavity"
+gap = [129, 3]
+
+[motifs.pier-hatch]
+art = "pier-hatch"
+gap = [129, 3]
+
+[motifs.pier-face]
+art = "pier-face"
+gap = [129, 3]
+
+[motifs.pier-shadow]
+art = "pier-shadow"
+gap = [129, 3]
+
+[[layers]]
+id = "piers-shadow"
+slot = "outer"
+motif = "pier-shadow"
+offset = [1, 1]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "piers-outline"
+slot = "outer"
+motif = "pier-outline"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "piers-light"
+slot = "outer"
+motif = "pier-light"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "piers-cavity"
+slot = "outer"
+motif = "pier-cavity"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "piers-hatch"
+slot = "outer"
+motif = "pier-hatch"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "piers-face"
+slot = "outer"
+motif = "pier-face"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "mark"
+slot = "outer"
+art = "maker-mark"
+offset = [10, 1]
+mode = "transparent-cell"
+repeat = false
+
+[[layers]]
+id = "hero-shadow"
+slot = "outer"
+art = "hero-shadow"
+offset = [6, 4]
+mode = "transparent-cell"
+repeat = false
+
+[[layers]]
+id = "hero-outline"
+slot = "outer"
+art = "hero-outline"
+offset = [5, 4]
+mode = "transparent-cell"
+repeat = false
+
+[[layers]]
+id = "hero-light"
+slot = "outer"
+art = "hero-light"
+offset = [5, 4]
+mode = "transparent-cell"
+repeat = false
+
+[[layers]]
+id = "hero-cavity"
+slot = "outer"
+art = "hero-cavity"
+offset = [5, 4]
+mode = "transparent-cell"
+repeat = false
+
+[[layers]]
+id = "hero-hatch"
+slot = "outer"
+art = "hero-hatch"
+offset = [5, 4]
+mode = "transparent-cell"
+repeat = false
+
+[[layers]]
+id = "hero-face"
+slot = "outer"
+art = "hero-face"
+offset = [5, 4]
+mode = "transparent-cell"
+repeat = false
+
+[[layers]]
+id = "divider-cavity"
+slot = "divider"
+art = "molding-cavity"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "divider-hatch"
+slot = "divider"
+art = "molding-hatch"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "divider-outline"
+slot = "divider"
+art = "molding-outline"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "divider-light"
+slot = "divider"
+art = "molding-light"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "edit-cavity"
+slot = "tile.edit.chrome"
+art = "molding-cavity"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "edit-hatch"
+slot = "tile.edit.chrome"
+art = "molding-hatch"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "edit-outline"
+slot = "tile.edit.chrome"
+art = "molding-outline"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "edit-light"
+slot = "tile.edit.chrome"
+art = "molding-light"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "view-cavity"
+slot = "tile.view.chrome"
+art = "molding-cavity"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "view-hatch"
+slot = "tile.view.chrome"
+art = "molding-hatch"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "view-outline"
+slot = "tile.view.chrome"
+art = "molding-outline"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "view-light"
+slot = "tile.view.chrome"
+art = "molding-light"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "filesystem-cavity"
+slot = "tile.filesystem.chrome"
+art = "molding-cavity"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "filesystem-hatch"
+slot = "tile.filesystem.chrome"
+art = "molding-hatch"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "filesystem-outline"
+slot = "tile.filesystem.chrome"
+art = "molding-outline"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "filesystem-light"
+slot = "tile.filesystem.chrome"
+art = "molding-light"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "contents-cavity"
+slot = "tile.contents.chrome"
+art = "molding-cavity"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "contents-hatch"
+slot = "tile.contents.chrome"
+art = "molding-hatch"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "contents-outline"
+slot = "tile.contents.chrome"
+art = "molding-outline"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[layers]]
+id = "contents-light"
+slot = "tile.contents.chrome"
+art = "molding-light"
+offset = [0, 0]
+mode = "transparent-cell"
+repeat = true
+
+[[rules]]
+target = "layer.edit-outline"
+states = ["focused"]
+set = { style = "active" }
+
+[[rules]]
+target = "layer.view-outline"
+states = ["focused"]
+set = { style = "active" }
+
+[[rules]]
+target = "layer.filesystem-outline"
+states = ["focused"]
+set = { style = "active" }
+
+[[rules]]
+target = "layer.contents-outline"
+states = ["focused"]
+set = { style = "active" }
+
+[[rules]]
+target = "layer.edit-outline"
+states = ["dirty"]
+set = { style = "attention" }
+
+[[rules]]
+target = "layer.edit-outline"
+cue = "save-success"
+set = { style = "saved" }
+
+[[rules]]
+target = "layer.edit-outline"
+cue = "save-failure"
+set = { style = "fault" }
+
+[[variants]]
+when = { max_width = 119 }
+hide_layers = ["hero-shadow", "hero-outline", "hero-light", "hero-cavity", "hero-hatch", "hero-face", "mark"]
+
+[[variants]]
+when = { high_contrast = true }
+hide_layers = ["piers-shadow", "piers-outline", "piers-light", "piers-cavity", "piers-hatch", "piers-face", "hero-shadow", "hero-outline", "hero-light", "hero-cavity", "hero-hatch", "hero-face", "mark", "patina"]
+
+[fallbacks.ascii]
+# All drawings already use printable ASCII.
+glyph = "."
+
+[fallbacks.monochrome]
+glyph = "."
+# Preserve contours, hatch and counters; remove displaced shadows.
+hide_layers = ["hero-shadow", "piers-shadow", "patina"]
+
+[fallbacks.narrow]
+glyph = "."
+hide_layers = ["piers-shadow", "piers-outline", "piers-light", "piers-cavity", "piers-hatch", "piers-face", "hero-shadow", "hero-outline", "hero-light", "hero-cavity", "hero-hatch", "hero-face", "mark", "patina"]
+
+[fallbacks.reduced_motion]
+glyph = "."
+# The entire relief remains static in all motion modes.
