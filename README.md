@@ -57,7 +57,33 @@ Drag either one-cell divider with the left or right mouse button. Release commit
 
 The palette exposes commands without dedicated shortcuts, including keyboard split resizing, theme selection, Contents filtering and script cancellation. Alt-prefixed keys can also be entered as Escape then the key where the terminal supports that convention. The ribbon uses a latched fallback, not a claim of portable Alt-key-release detection. Ctrl+H is kept compatible with Backspace; it is deliberately not Replace.
 
-The clipboard is **application-local**. Pasting from the operating system uses the terminal's own paste shortcut and bracketed-paste protocol. MDBM does not write OSC-52 clipboard escapes. A documented Vim subset supplies Normal/Insert/Visual modes; it is not a full Vim emulator. The detailed keyboard/mouse and mode contracts are in `docs/MDBM_PRODUCT_SPEC.md` and F1.
+The clipboard is **application-local**. Pasting from the operating system uses the terminal's own paste shortcut and bracketed-paste protocol. MDBM does not write OSC-52 clipboard escapes.
+
+### Drag-and-drop files in a terminal
+
+MDBM has **no portable native OS drag/drop event**. Some terminal emulators insert
+a dropped file's pathname as **bracketed paste**; other terminals deliver
+different data or do not support file drops. In compatible terminals, focus
+Filesystem, Contents, or View (or use Vim Normal/Visual mode in Edit), then
+drop or paste a recognizable local path. MDBM opens it through the same
+workspace-root and multi-document lifecycle as **Ctrl+O**.
+
+One local path, individually single-/double-quoted paths (including spaces),
+POSIX backslash-escaped spaces, Windows drive-letter paths on Windows, and
+newline-separated path lists are recognized. Unquoted multi-path strings with
+ambiguous spaces are **not** split. Each file must be an existing local,
+UTF-8 regular file admitted by the current workspace's SafeFiles policy.
+Outside-root paths, state paths, symlinks/junctions, URLs, and shell-like
+syntax are refused. Valid paths in a multi-file drop remain open even when
+another member is rejected. MDBM never invokes a shell or expands commands,
+globs, environment variables, or tilde for terminal paste.
+
+**Edit insertion mode and all text-entry dialogs always receive pasted paths
+as literal text**, never file-open requests. After opening a file, MDBM focuses
+Edit, so focus a non-edit tile again before using another drop in the standard
+keyboard profile. Actual terminal-emulator behavior varies; use Ctrl+O when
+your terminal does not paste dropped file paths.
+ A documented Vim subset supplies Normal/Insert/Visual modes; it is not a full Vim emulator. The detailed keyboard/mouse and mode contracts are in `docs/MDBM_PRODUCT_SPEC.md` and F1.
 
 ## Reading and editing
 
