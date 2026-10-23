@@ -83,7 +83,7 @@ def test_pty_bracketed_path_paste_opens_document(tmp_path):
         # Alt+1 focuses Filesystem: ordinary Edit insertion must be exited first.
         child.send('\x1b1'); time.sleep(.12)
         child.send('\x1b[200~'+str(dropped)+'\x1b[201~')
-        child.expect('Opened 1 file')
+        child.expect('drop target')
         child.send('X'); time.sleep(.08); child.sendcontrol('s')
         child.expect('Saved'); finish(child)
         assert dropped.read_text()=='Xdrop target\n'
