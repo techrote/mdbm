@@ -2701,18 +2701,32 @@ class Capture:
 
 
 class PreviewWorker:
-    """One daemon worker, one replaceable pending snapshot, one latest result."""
+    """One daemon worker, one replaceable pending snapshot, one latest result.
+
+    The four-argument request/poll form remains supported for callers that use
+    PreviewWorker directly. Workspace uses the five-argument document-aware
+    form so a result can never be accepted by a different active document.
+    """
     def __init__(self):
         import threading
         self.condition=threading.Condition()
-        self.pending: tuple[str,str,int,int,bool] | None=None
-        self.result: tuple[str,int,int,Any] | None=None
+        self.pending: tuple[str,str,int,int,bool,bool] | None=None
+        self.result: tuple[Any,...] | None=None
         self.stopped=False; self.busy=False
         self.thread=threading.Thread(target=self._run,name='MDBM-preview',daemon=True); self.thread.start()
 
-    def request(self, document_id: str, text: str, generation: int, width: int, ascii_only: bool) -> None:
+    def request(self, *args: Any) -> None:
+        if len(args)==4:
+            text,generation,width,ascii_only=args
+            document_id=''; legacy=True
+        elif len(args)==5:
+            document_id,text,generation,width,ascii_only=args
+            legacy=False
+        else:
+            raise TypeError('PreviewWorker.request expects 4 or 5 arguments')
         with self.condition:
-            self.pending=(document_id,text,generation,width,ascii_only); self.condition.notify()
+            self.pending=(str(document_id),str(text),int(generation),int(width),bool(ascii_only),legacy)
+            self.condition.notify()
 
     def _run(self) -> None:
         while True:
@@ -2721,14 +2735,15 @@ class PreviewWorker:
                 if self.stopped: return
                 job=self.pending; self.pending=None; self.busy=True
             assert job is not None
-            document_id,text,generation,width,ascii_only=job
+            document_id,text,generation,width,ascii_only,legacy=job
             try: result=parse_and_layout(text,generation,width,ascii_only)
             except Exception as exc: result=display_text(exc)
             with self.condition:
-                if not self.stopped: self.result=(document_id,generation,width,result)
+                if not self.stopped:
+                    self.result=(generation,width,result) if legacy else (document_id,generation,width,result)
                 self.busy=False
 
-    def poll(self) -> tuple[str,int,int,Any] | None:
+    def poll(self) -> tuple[Any,...] | None:
         with self.condition:
             result=self.result; self.result=None; return result
 
@@ -3320,11 +3335,13 @@ class Workspace:
         ids=set(document_ids)
         if not ids: return
         self._sync_active_state()
-        prior_index=next((i for i,state in enumerate(self.documents) if state.id==self.active_document_id),0)
+        active_id=self.active_document_id
+        prior_index=next((i for i,state in enumerate(self.documents) if state.id==active_id),0)
         self.documents=[state for state in self.documents if state.id not in ids]
         if not self.documents:
             self.documents.append(self._make_document_state(DocumentModel()))
-        target=self.documents[min(prior_index,len(self.documents)-1)]
+        retained=self._state_by_id(active_id) if active_id not in ids else None
+        target=retained or self.documents[min(prior_index,len(self.documents)-1)]
         self._bind_document_state(target)
         if self.store: self.persist_recovery()
 
@@ -4752,9 +4769,13 @@ class Workspace:
         if self.worker:
             result=self.worker.poll()
             if result:
-                document_id,generation,width,payload=result
-                if document_id==self.active_document_id and self.accept_preview(generation,width,payload):
-                    self.invalidate()
+                if len(result)==4:
+                    document_id,generation,width,payload=result
+                    if document_id==self.active_document_id and self.accept_preview(generation,width,payload):
+                        self.invalidate()
+                else:
+                    generation,width,payload=result
+                    if self.accept_preview(generation,width,payload): self.invalidate()
             desired=(self.doc.generation,self.preview_width)
             if desired!=self.requested_parse and now-self.doc.last_edit>=self.config.get('session','parse_debounce_ms')/1000:
                 self.worker.request(self.active_document_id,self.doc.text,*desired,self.config.ascii)
