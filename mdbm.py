@@ -348,6 +348,10 @@ def parse_terminal_paths(payload: str) -> list[str] | None:
                 if index<len(line) and line[index]!=' ': return None
         else:
             if '"' in line or "'" in line: return None
+            # Unescaped spaces are ambiguous in POSIX path lists: require
+            # quoting or backslash-space, except for Windows drive paths.
+            if not re.match(r'^[A-Za-z]:[\\/]',line) and ' ' in line.replace('\\ ',''):
+                return None
             # Drive paths must retain backslashes; POSIX backslash-space is
             # the only unquoted escape accepted.
             if re.match(r'^[A-Za-z]:[\\/]',line):
