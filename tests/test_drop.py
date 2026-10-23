@@ -1,4 +1,6 @@
 """MDBM-003 conservative terminal path ingress and canonical lifecycle regressions."""
+from pathlib import Path
+
 import pytest
 import mdbm as m
 
@@ -223,3 +225,18 @@ def test_meta_and_url_payloads_never_open_a_valid_member(tmp_path):
     for payload in (f'"{b}" "$(touch foo)"',f'"{b}" https://example.com'):
         paste_from_filesystem(w,payload)
         assert len(w.documents)==1 and w.doc.path==a
+
+
+def test_drop_directory_change_race_cannot_replace_workspace(tmp_path,monkeypatch):
+    a=tmp_path/'a.md'; a.write_text('A')
+    directory=tmp_path/'changed.md'; directory.mkdir()
+    w=workspace(tmp_path); start(w,a)
+    real_is_file=Path.is_file
+    # Simulate a file turning into a directory after ingress checks the type.
+    def claimed_file(path):
+        return True if path==directory else real_is_file(path)
+    monkeypatch.setattr(Path,'is_file',claimed_file)
+    paste_from_filesystem(w,str(directory))
+    assert w.files.root==tmp_path.resolve()
+    assert len(w.documents)==1 and w.doc.path==a
+    assert w.notice_error and 'Only existing regular files' in w.notice

@@ -3371,9 +3371,12 @@ class Workspace:
         self._bind_document_state(state)
         return state
 
-    def open_path(self, path: str | Path, fragment: str = '') -> None:
+    def open_path(self, path: str | Path, fragment: str = '',
+                  *, allow_directory: bool = True) -> None:
         target=self.files.resolve(path)
         if target.is_dir():
+            if not allow_directory:
+                raise PathError('Only existing regular files may be dropped.')
             self.change_root(target); return
         existing=self._state_by_path(target)
         if existing is not None:
@@ -4440,7 +4443,7 @@ class Workspace:
                 if not target.is_file():
                     raise PathError('Only existing regular files may be dropped.')
                 duplicate=self._state_by_path(target) is not None
-                self.open_path(target)
+                self.open_path(target,allow_directory=False)
                 if duplicate: existing+=1
                 else: opened+=1
             except (MDBMError,OSError,ValueError) as exc:
