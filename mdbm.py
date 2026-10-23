@@ -391,6 +391,22 @@ def width_of(text: str, ascii_only: bool = False, tab_size: int = 4) -> int:
     return sum(u.width for u in display_units(text, ascii_only, tab_size))
 
 
+def fit_cells(text: str, max_width: int, ascii_only: bool = False) -> str:
+    """Return display-safe text clipped to a cell budget, with a visible ellipsis."""
+    max_width=max(0,int(max_width))
+    if max_width==0: return ''
+    value=display_text(text,ascii_only)
+    if width_of(value,ascii_only)<=max_width: return value
+    marker='...' if ascii_only and max_width>=3 else '.' if ascii_only else '…'
+    marker_width=width_of(marker,ascii_only)
+    if marker_width>max_width: return ''
+    out=[]; used=0; room=max_width-marker_width
+    for unit in display_units(value,ascii_only):
+        if used+unit.width>room: break
+        out.append(unit.glyph); used+=unit.width
+    return ''.join(out)+marker
+
+
 def cell_to_offset(text: str, column: int, ascii_only: bool = False, tab_size: int = 4) -> int:
     x = 0
     for u in display_units(text, ascii_only, tab_size):
@@ -1607,6 +1623,11 @@ def solve_geometry(width: int, height: int, state: LayoutState, config: Config,
                    theme: Theme) -> Geometry:
     width,height=max(1,int(width)),max(1,int(height))
     viewport=Rect(0,0,width,height)
+    # Ribbon row 0 and status row -1 are host-owned. Row 1 remains part of the
+    # decorative outer canvas so fitted themes retain their geometry contract;
+    # the protected tab plane later masks that row. Operational tile minima
+    # account for the tab row separately and compact before any tile is crushed.
+    tab_rows=1 if height>=3 else 0
     available=Rect(0,min(1,height),width,max(0,height-2))
     visible=state.visible()
     if not visible:
@@ -1626,7 +1647,7 @@ def solve_geometry(width: int, height: int, state: LayoutState, config: Config,
         b,d,s=tb+ub,td+ud,ts+us
         margins=[t+u for t,u in zip(tm,um)]
         needed_w=columns*(minw+2*(1+b))+(1+2*d if columns==2 else 0)+margins[1]+margins[3]+2*s
-        needed_h=rows*(minh+2*(1+b))+(1+2*d if rows==2 else 0)+margins[0]+margins[2]+2*s
+        needed_h=rows*(minh+2*(1+b))+(1+2*d if rows==2 else 0)+margins[0]+margins[2]+2*s+tab_rows
         return needed_w,needed_h
 
     # The loops are bounded by validated decoration maxima (<400 iterations).
@@ -1658,6 +1679,8 @@ def solve_geometry(width: int, height: int, state: LayoutState, config: Config,
     outer_workspace=Rect(left,available.y+top,max(0,width-left-right),max(0,available.h-top-bottom))
     spacer=ts+us
     workspace=outer_workspace.inset(spacer)
+    if tab_rows and workspace.h:
+        workspace=Rect(workspace.x,workspace.y+1,workspace.w,max(0,workspace.h-1))
     border=tb+ub; divider_band=td+ud
     tiles: dict[Tile,Rect]={}; dividers: dict[str,Rect]={}
     if compact:
@@ -2893,6 +2916,10 @@ Ctrl+F find; F3 next; F7 previous; F6 / Ctrl+R replace;
 Ctrl+G go to line and optional column. Insert a literal Tab with the command palette (Edit → Insert a tab character).
 Ctrl+I is indistinguishable from Tab in standard terminals.
 
+Documents: use Ctrl+P → Next document / Previous document / Close document.
+Ctrl+Tab and Ctrl+Shift+Tab are intentionally not bound: standard terminal
+input does not portably distinguish Ctrl+Tab from Tab across supported hosts.
+
 Filesystem: Up/Down row; Left collapse/parent; Right expand;
 Enter open/toggle; F2 rename/move; Delete trash (confirmation); F5 refresh.
 Contents: Up/Down row, Left/Right hierarchy, Enter reveal source.
@@ -3352,6 +3379,75 @@ class Workspace:
         self._bind_document_state(target)
         return target
 
+    def cycle_document(self, direction: int) -> None:
+        if len(self.documents)<2: return
+        index=next((i for i,state in enumerate(self.documents)
+                    if state.id==self.active_document_id),0)
+        target=self.documents[(index+(1 if direction>=0 else -1))%len(self.documents)]
+        self.activate_document(target.id)
+        label=dict(self.document_tab_labels()).get(target.id,'document')
+        self.status('Active document · '+display_text(label,self.config.ascii))
+
+    def document_tab_labels(self) -> list[tuple[str,str]]:
+        """Derive readable labels from authoritative document paths and order."""
+        labels: dict[str,str]={}
+        untitled=0
+        groups: dict[str,list[OpenDocumentState]]=collections.defaultdict(list)
+        for state in self.documents:
+            if state.doc.path is None:
+                untitled+=1
+                labels[state.id]='Untitled' if untitled==1 else f'Untitled {untitled}'
+            else:
+                groups[state.doc.path.name.casefold()].append(state)
+        for group in groups.values():
+            if len(group)==1:
+                labels[group[0].id]=group[0].doc.path.name  # type: ignore[union-attr]
+                continue
+            parts_by_id: dict[str,tuple[str,...]]={}
+            for state in group:
+                assert state.doc.path is not None
+                try: parts=state.doc.path.relative_to(self.files.root).parts
+                except ValueError: parts=state.doc.path.parts
+                parts_by_id[state.id]=parts
+            for state in group:
+                parts=parts_by_id[state.id]; chosen='/'.join(parts)
+                for depth in range(1,max(1,len(parts))):
+                    take=min(len(parts),depth+1)
+                    candidate='/'.join(parts[-take:])
+                    if all(
+                        other.id==state.id or
+                        '/'.join(parts_by_id[other.id][-min(len(parts_by_id[other.id]),take):]).casefold()!=candidate.casefold()
+                        for other in group
+                    ):
+                        chosen=candidate; break
+                labels[state.id]=chosen
+        return [(state.id,labels[state.id]) for state in self.documents]
+
+    def _tab_nominal_width(self, label: str) -> int:
+        # Two edge cells, optional dirty marker and close affordance are budgeted
+        # separately by paint_tabs. Cap long paths so neighbours remain useful.
+        return min(30,max(5,width_of(display_text(label,self.config.ascii),self.config.ascii)+5))
+
+    def tab_window(self, width: int) -> tuple[int,int]:
+        """Return a deterministic contiguous tab range containing the active tab."""
+        count=len(self.documents)
+        if count==0 or width<=0: return (0,0)
+        labels=dict(self.document_tab_labels())
+        widths=[self._tab_nominal_width(labels[state.id]) for state in self.documents]
+        if sum(widths)<=width: return (0,count)
+        active=next((i for i,state in enumerate(self.documents)
+                     if state.id==self.active_document_id),0)
+        usable=max(1,width-4)  # fixed left/right overflow indicator reserve
+        start=active; end=active+1; used=min(widths[active],usable)
+        while True:
+            changed=False
+            if end<count and used+widths[end]<=usable:
+                used+=widths[end]; end+=1; changed=True
+            if start>0 and used+widths[start-1]<=usable:
+                start-=1; used+=widths[start]; changed=True
+            if not changed: break
+        return (start,end)
+
     def set_document(self, doc: DocumentModel, clear_recovery: bool = True) -> None:
         state=self._active_state()
         doc.generation=self.doc.generation+1; doc.max_chars=self.files.max_bytes
@@ -3634,7 +3730,13 @@ class Workspace:
         r.add('file.open','Open file…',lambda p:self.request_text('Open file','',self.open_path,'UTF-8 path relative to this workspace.'),['c-o'],'File')
         r.add('file.save','Save',lambda p:self.save(),['c-s'],'File')
         r.add('file.save_as','Save As…',lambda p:self.save(True),['f4'],'File')
-        r.add('file.close','Close document',lambda p:self.close_document(),[],'File')
+        # Compatibility alias retained for existing configs; MDBM-002 exposes
+        # document.* as the stable navigation command namespace.
+        r.add('file.close','Close document',lambda p:self.close_document(),[],'File','Ctrl+P → Close document',False)
+        r.add('document.close','Close document',lambda p:self.close_document(str(p) if p else None),[],'File')
+        r.add('document.next','Next document',lambda p:self.cycle_document(1),[],'Navigate')
+        r.add('document.previous','Previous document',lambda p:self.cycle_document(-1),[],'Navigate')
+        r.add('document.activate','Activate document',lambda p:self.activate_document(str(p)),[],'Navigate','Tab strip click',False)
         r.add('file.root','Change workspace root…',lambda p:self.request_text('Workspace root',str(self.files.root),lambda v:self.change_root(Path(v).expanduser())),[],'File')
         r.add('file.mkdir','New directory…',lambda p:self.request_text('New directory','new-folder',lambda v:(self.files.mkdir(v),self.refresh_tree())),[],'File')
         r.add('file.rename','Rename / move selected item…',lambda p:self.rename_selected(),['f2'],'File')
@@ -3969,7 +4071,7 @@ class Workspace:
             suffix='  '+command.keys[0] if command.keys else ''
             return MenuItem(label or command.label+suffix,cid)
         if name=='File':
-            return [item(cid) for cid in ('file.new','file.open','file.save','file.save_as','file.close','file.mkdir','file.rename','file.trash','file.root','file.quit')]
+            return [item(cid) for cid in ('file.new','file.open','file.save','file.save_as','document.close','file.mkdir','file.rename','file.trash','file.root','file.quit')]
         if name=='Edit':
             return [item(cid) for cid in ('edit.undo','edit.redo','edit.copy','edit.cut','edit.paste','edit.select_all','edit.find','edit.replace','edit.insert_tab','edit.profile')]
         if name=='Tile':
@@ -3978,7 +4080,7 @@ class Workspace:
                     MenuItem('Visibility',children=tuple(item(cid) for cid in ('tile.toggle_left','tile.toggle_right','tile.toggle_edit','tile.toggle_view'))),
                     MenuItem('Resize',children=tuple(item(cid) for cid in ('layout.narrow_left','layout.widen_left','layout.shrink_view','layout.grow_view'))),item('tile.restore')]
         if name=='Navigate':
-            return [item(cid) for cid in ('edit.goto','edit.find_next','edit.find_previous','navigate.contents_filter','navigate.refresh','navigate.previous_link','navigate.next_link','navigate.follow_link')]
+            return [item(cid) for cid in ('document.previous','document.next','edit.goto','edit.find_next','edit.find_previous','navigate.contents_filter','navigate.refresh','navigate.previous_link','navigate.next_link','navigate.follow_link')]
         if name=='Theme':
             return [item(cid) for cid in ('theme.choose','theme.minimal','theme.motion','theme.immersive','theme.high_contrast','theme.ascii')]
         if name=='Scripts':
@@ -4561,9 +4663,10 @@ class Workspace:
         if not self.geometry.tiles:
             work=self.geometry.workspace
             message='[ Restore tiles: Ctrl+T ]'
-            x=max(work.x,work.x+(work.w-len(message))//2); y=max(1,work.y+work.h//2)
+            x=max(work.x,work.x+(work.w-len(message))//2); y=max(2,work.y+work.h//2)
             canvas.text(x,y,message,HOST_FOCUS,100,canvas.bounds,self.config.ascii)
             self.add_hit(Rect(x,y,min(len(message),max(0,width-x)),1),'tile.restore')
+        self.paint_tabs(canvas)
         self.paint_ribbon(canvas)
         self.paint_status(canvas)
         for index,overlay in enumerate(self.overlays):
@@ -4573,6 +4676,61 @@ class Workspace:
         self.last_damage=canvas.changed(self.last_canvas); self.last_canvas=canvas
         self.frame_ms.append((time.perf_counter()-started)*1000)
         return canvas
+
+    def paint_tabs(self, canvas: Canvas) -> None:
+        if canvas.height<3: return
+        y=1; width=canvas.width
+        row=Rect(0,y,width,1)
+        canvas.fill(row,HOST_CHROME,plane=100)
+        labelled=self.document_tab_labels()
+        if not labelled or width<=0: return
+        start,end=self.tab_window(width)
+        hidden_left=start>0; hidden_right=end<len(labelled)
+        x=0
+        if hidden_left and width>=2:
+            canvas.text(0,y,'< ',HOST_CHROME,100,row,self.config.ascii); x=2
+        right_reserve=2 if hidden_right and width>=2 else 0
+        right_limit=max(x,width-right_reserve)
+        labels=dict(labelled)
+        for index in range(start,end):
+            state=self.documents[index]
+            remaining=right_limit-x
+            if remaining<=0: break
+            target=min(self._tab_nominal_width(labels[state.id]),remaining)
+            active=state.id==self.active_document_id
+            dirty=state.doc.dirty
+            # Close is explicit whenever the allocated tab is wide enough.
+            close_allowed=target>=(6 if dirty else 5)
+            fixed=2+(1 if dirty else 0)+(2 if close_allowed else 0)
+            if target<=fixed:
+                close_allowed=False; fixed=2+(1 if dirty else 0)
+            label_room=max(1,target-fixed)
+            label=fit_cells(labels[state.id],label_room,self.config.ascii)
+            prefix='[' if active else ' '
+            suffix=']' if active else ' '
+            marker='*' if dirty else ''
+            close=' x' if close_allowed else ''
+            text=prefix+label+marker+close+suffix
+            actual=min(remaining,width_of(text,self.config.ascii))
+            if actual<=0: break
+            ink=HOST_SELECTED if active else HOST_CHROME
+            tab_rect=Rect(x,y,actual,1)
+            canvas.fill(tab_rect,ink,plane=100)
+            canvas.text(x,y,text,ink,100,tab_rect,self.config.ascii)
+            self.add_hit(tab_rect,'document.activate',state.id,role='tab')
+            marker_x=x+width_of(prefix+label,self.config.ascii)
+            if dirty and marker_x<tab_rect.right:
+                canvas.text(marker_x,y,'*',HOST_ERROR,100,tab_rect,self.config.ascii)
+            if close_allowed:
+                close_x=x+width_of(prefix+label+marker+' ',self.config.ascii)
+                if close_x<tab_rect.right:
+                    canvas.text(close_x,y,'x',HOST_FOCUS,100,tab_rect,self.config.ascii)
+                    # Added after activation so reverse hit-testing gives close
+                    # precedence over the encompassing tab target.
+                    self.add_hit(Rect(close_x,y,1,1),'document.close',state.id,role='tab')
+            x+=actual
+        if hidden_right and width>=2:
+            canvas.text(width-2,y,' >',HOST_CHROME,100,row,self.config.ascii)
 
     def paint_ribbon(self, canvas: Canvas) -> None:
         width=canvas.width
