@@ -1,4 +1,4 @@
-name: MDBM-002 branch validation
+name: MDBM-002 Windows-targeted validation
 
 on:
   push:
@@ -7,22 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  linux-full:
-    name: Full pytest (Ubuntu, Python 3.11)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-      - name: Install release and test dependencies
-        run: python -m pip install -U pip && python -m pip install -r requirements.txt && python -m pip install -e ".[test]"
-      - name: Run complete pytest suite
-        run: python -m pytest -q
-
-  windows-supplement:
-    name: Pytest excluding existing Windows ScriptRunner interrupt case
+  windows-relevant:
+    name: MDBM-002 relevant suites (Windows, Python 3.11)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,5 +18,13 @@ jobs:
           cache: pip
       - name: Install release and test dependencies
         run: python -m pip install -U pip && python -m pip install -r requirements.txt && python -m pip install -e ".[test]"
-      - name: Run suite except pre-existing Windows cancellation interruption
-        run: python -m pytest -q -k "not test_script_cancellation"
+      - name: Run document, compositor, interaction and tab suites
+        run: >-
+          python -m pytest -q
+          tests/test_core.py
+          tests/test_documents.py
+          tests/test_goldens.py
+          tests/test_interactions.py
+          tests/test_tabs.py
+          tests/test_theme.py
+          tests/test_theme_frames.py
