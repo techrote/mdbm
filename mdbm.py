@@ -1548,13 +1548,12 @@ def solve_geometry(width: int, height: int, state: LayoutState, config: Config,
                    theme: Theme) -> Geometry:
     width,height=max(1,int(width)),max(1,int(height))
     viewport=Rect(0,0,width,height)
-    # Ribbon row 0 and status row -1 are host-owned. Reserve row 1 for
-    # document tabs when the terminal is tall enough; operational minima below
-    # are then evaluated against the remaining workspace so compact mode wins
-    # before the tab strip can crush a tile.
+    # Ribbon row 0 and status row -1 are host-owned. Row 1 remains part of the
+    # decorative outer canvas so fitted themes retain their geometry contract;
+    # the protected tab plane later masks that row. Operational tile minima
+    # account for the tab row separately and compact before any tile is crushed.
     tab_rows=1 if height>=3 else 0
-    top_rows=min(height,1+tab_rows)
-    available=Rect(0,top_rows,width,max(0,height-top_rows-1))
+    available=Rect(0,min(1,height),width,max(0,height-2))
     visible=state.visible()
     if not visible:
         return Geometry(viewport,available,{}, {}, {}, {'outer':(available,)},False,(0,0,0,0),0)
@@ -1573,7 +1572,7 @@ def solve_geometry(width: int, height: int, state: LayoutState, config: Config,
         b,d,s=tb+ub,td+ud,ts+us
         margins=[t+u for t,u in zip(tm,um)]
         needed_w=columns*(minw+2*(1+b))+(1+2*d if columns==2 else 0)+margins[1]+margins[3]+2*s
-        needed_h=rows*(minh+2*(1+b))+(1+2*d if rows==2 else 0)+margins[0]+margins[2]+2*s
+        needed_h=rows*(minh+2*(1+b))+(1+2*d if rows==2 else 0)+margins[0]+margins[2]+2*s+tab_rows
         return needed_w,needed_h
 
     # The loops are bounded by validated decoration maxima (<400 iterations).
@@ -1605,6 +1604,8 @@ def solve_geometry(width: int, height: int, state: LayoutState, config: Config,
     outer_workspace=Rect(left,available.y+top,max(0,width-left-right),max(0,available.h-top-bottom))
     spacer=ts+us
     workspace=outer_workspace.inset(spacer)
+    if tab_rows and workspace.h:
+        workspace=Rect(workspace.x,workspace.y+1,workspace.w,max(0,workspace.h-1))
     border=tb+ub; divider_band=td+ud
     tiles: dict[Tile,Rect]={}; dividers: dict[str,Rect]={}
     if compact:
