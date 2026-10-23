@@ -375,8 +375,11 @@ def parse_terminal_paths(payload: str) -> list[str] | None:
             # No shell operators, substitutions, interpolations or globs.
             if any(ch in '$|&;<>*?{}[]()!%~^#' or ord(ch)==96 for ch in path):
                 return None
-            if '://' in path or path.casefold().startswith(
-                    ('file:','http:','https:','ftp:','sftp:','ssh:','data:')):
+            # Refuse URI schemes (mailto:, smb:, file:, custom:, etc.).
+            # A true absolute Windows drive path is the only colon prefix
+            # admitted; SafeFiles still validates the workspace root.
+            if '://' in path or (re.match(r'^[A-Za-z][A-Za-z0-9+.-]*:',path)
+                    and not re.match(r'^[A-Za-z]:[\\/]',path)):
                 return None
             if path.startswith('-'): return None
             result.append(path)
