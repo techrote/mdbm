@@ -90,6 +90,7 @@ MAX_ART_CELLS = 262144
 MAX_DEPTH = 16
 MAX_UNDO_BYTES = 32 * 1024 * 1024
 MAX_UNDO_STEPS = 512
+MAX_OPEN_DOCUMENTS = 32
 MAX_PREVIEW_ROWS = 300000
 MAX_PARSE_TOKENS = 500000
 NAME_RE = re.compile(r'^[a-z][a-z0-9_.-]{0,63}$')
@@ -2145,7 +2146,7 @@ class StateStore:
         result=[]
         for p in list(self.directory.glob('recovery*.json'))[:64]:
             data=self.read(p.name,max_bytes*8+4096)
-            if isinstance(data,dict) and data.get('schema')=='mdbm-recovery/1.0':
+            if isinstance(data,dict) and data.get('schema') in ('mdbm-recovery/1.0','mdbm-recovery/2.0'):
                 result.append((p.name,data))
         return sorted(result,key=lambda item:item[1].get('timestamp',0) if type(item[1].get('timestamp',0)) in (int,float) else 0,reverse=True)
 
@@ -2207,6 +2208,22 @@ class PreviewLayout:
     def source_to_row(self, line: int) -> int:
         i=max(0,bisect.bisect_right(self.source_lines,line)-1)
         return self.source_rows[i] if self.source_rows else 0
+
+
+
+@dataclass(slots=True)
+class OpenDocumentState:
+    """Document-owned state kept independently while other documents are active."""
+    id: str
+    doc: DocumentModel
+    memories: dict[Tile,TileMemory] = field(default_factory=lambda:{
+        Tile.EDIT:TileMemory(), Tile.VIEW:TileMemory(), Tile.CONTENTS:TileMemory()})
+    contents_collapsed: set[str] = field(default_factory=set)
+    parsed: ParsedMarkdown | None = None
+    preview: PreviewLayout | None = None
+    requested_parse: tuple[int,int] | None = None
+    selected_link: int = -1
+    view_links: list[str] = field(default_factory=list)
 
 
 BARE_URL = re.compile(r'https?://[^\s<>]+')
@@ -2687,13 +2704,15 @@ class PreviewWorker:
     """One daemon worker, one replaceable pending snapshot, one latest result."""
     def __init__(self):
         import threading
-        self.condition=threading.Condition(); self.pending: tuple[str,int,int,bool] | None=None
-        self.result: tuple[int,int,Any] | None=None; self.stopped=False; self.busy=False
+        self.condition=threading.Condition()
+        self.pending: tuple[str,str,int,int,bool] | None=None
+        self.result: tuple[str,int,int,Any] | None=None
+        self.stopped=False; self.busy=False
         self.thread=threading.Thread(target=self._run,name='MDBM-preview',daemon=True); self.thread.start()
 
-    def request(self, text: str, generation: int, width: int, ascii_only: bool) -> None:
+    def request(self, document_id: str, text: str, generation: int, width: int, ascii_only: bool) -> None:
         with self.condition:
-            self.pending=(text,generation,width,ascii_only); self.condition.notify()
+            self.pending=(document_id,text,generation,width,ascii_only); self.condition.notify()
 
     def _run(self) -> None:
         while True:
@@ -2702,14 +2721,14 @@ class PreviewWorker:
                 if self.stopped: return
                 job=self.pending; self.pending=None; self.busy=True
             assert job is not None
-            text,generation,width,ascii_only=job
+            document_id,text,generation,width,ascii_only=job
             try: result=parse_and_layout(text,generation,width,ascii_only)
             except Exception as exc: result=display_text(exc)
             with self.condition:
-                if not self.stopped: self.result=(generation,width,result)
+                if not self.stopped: self.result=(document_id,generation,width,result)
                 self.busy=False
 
-    def poll(self) -> tuple[int,int,Any] | None:
+    def poll(self) -> tuple[str,int,int,Any] | None:
         with self.condition:
             result=self.result; self.result=None; return result
 
@@ -2809,7 +2828,7 @@ class Workspace:
         self.store=StateStore(self.config.path('application','state_directory')) if persist else None
         saved=self.store.read('session.json') if self.store and restore and self.config.get('session','restore') else None
         if self.store: self.diagnostics.extend(self.store.diagnostics)
-        if not isinstance(saved,dict) or saved.get('schema')!='mdbm-session/1.0': saved={}
+        if not isinstance(saved,dict) or saved.get('schema') not in ('mdbm-session/1.0','mdbm-session/2.0'): saved={}
         root=self.config.path('application','root')
         if path is not None:
             path=path.expanduser().absolute(); root=path if path.is_dir() else path.parent
@@ -2835,20 +2854,38 @@ class Workspace:
         self.memories={tile:TileMemory() for tile in Tile}
         self.contents_collapsed: set[str]=set()
         self._restore_layout(saved)
-        self.doc=DocumentModel(WELCOME_TEXT)
+
+        self.parsed=ParsedMarkdown(-1,(PreviewBlock('empty',0,1,(Span('Preparing Markdown preview…','muted'),)),),())
+        self.preview=make_preview_layout(self.parsed,40,self.config.ascii)
+        self.requested_parse: tuple[int,int] | None=None; self.preview_width=40
+        self._selected_link=-1; self._view_links: list[str]=[]
+        self.documents: list[OpenDocumentState]=[]; self.active_document_id=''
+        restored_id: str | None=None
         active=path if path is not None and not path.is_dir() else None
-        if path is None and isinstance(saved.get('active_file'),str):
-            with contextlib.suppress(PathError): active=self.files.resolve(saved['active_file'])
         if active is not None:
             try:
                 active=self.files.resolve(active)
-                self.doc=DocumentModel.loaded(self.files.load(active)) if active.exists() else DocumentModel('',active)
-            except (OSError,PathError,ConflictError) as exc: self.diagnostics.append('File not opened: '+display_text(exc))
-        self.doc.max_chars=self.files.max_bytes
-        if path is None or (active and str(active)==saved.get('active_file')):
-            position=saved.get('cursor',0); anchor=saved.get('anchor')
-            if type(position) is int: self.doc.cursor=max(0,min(len(self.doc.text),position))
-            if type(anchor) is int: self.doc.anchor=max(0,min(len(self.doc.text),anchor))
+                doc=DocumentModel.loaded(self.files.load(active)) if active.exists() else DocumentModel('',active)
+                state=self._make_document_state(doc); self.documents.append(state); restored_id=state.id
+            except (OSError,PathError,ConflictError) as exc:
+                self.diagnostics.append('File not opened: '+display_text(exc))
+        elif path is None and saved.get('schema')=='mdbm-session/2.0':
+            restored_id=self._restore_session_documents(saved)
+        elif path is None and isinstance(saved.get('active_file'),str):
+            try:
+                active=self.files.resolve(saved['active_file'])
+                doc=DocumentModel.loaded(self.files.load(active)) if active.exists() else DocumentModel('',active)
+                position=saved.get('cursor',0); anchor=saved.get('anchor')
+                if type(position) is int: doc.cursor=max(0,min(len(doc.text),position))
+                if type(anchor) is int: doc.anchor=max(0,min(len(doc.text),anchor))
+                state=self._make_document_state(doc); self.documents.append(state); restored_id=state.id
+            except (OSError,PathError,ConflictError) as exc:
+                self.diagnostics.append('File not opened: '+display_text(exc))
+        if not self.documents:
+            state=self._make_document_state(DocumentModel(WELCOME_TEXT)); self.documents.append(state); restored_id=state.id
+        target=self._state_by_id(restored_id) if restored_id else self.documents[0]
+        self._bind_document_state(target or self.documents[0],emit=False)
+
         if not HAVE_MDIT_PLUGINS:
             self.diagnostics.append('mdit-py-plugins is not installed: bootstrap task/footnote rendering is active. Install requirements for the release parser.')
         try:
@@ -2858,9 +2895,6 @@ class Workspace:
         self.registry=CommandRegistry(); self.overlays: list[Overlay]=[]
         self.capture: Capture | None=None; self.geometry: Geometry | None=None; self.hits: list[Hit]=[]
         self.app: Application | None=None; self.worker: PreviewWorker | None=None
-        self.parsed=ParsedMarkdown(-1,(PreviewBlock('empty',0,1,(Span('Preparing Markdown preview…','muted'),)),),())
-        self.preview=make_preview_layout(self.parsed,40,self.config.ascii)
-        self.requested_parse: tuple[int,int] | None=None; self.preview_width=40
         self.notice='Ready · Ctrl+P for commands'; self.notice_error=False
         self.clipboard=''; self.search_term=''; self.search_replacement=''; self.vim_mode='normal' if self.config.get('input','profile')=='vim' else 'insert'
         self.last_click: tuple[float,int,int,str,int]=(0,-1,-1,'',0)
@@ -2873,8 +2907,8 @@ class Workspace:
         self.cue='startup'; self.cue_time=0.; self.session_seed=int.from_bytes(os.urandom(4),'little')
         self.last_canvas: Canvas | None=None; self.last_damage=0; self.frame_ms: collections.deque[float]=collections.deque(maxlen=512)
         self.screen_cursor=Point(x=0,y=0); self.show_cursor=False
-        self._dirty_known=self.doc.dirty; self._last_recovery_gen=-1; self._last_recovery_time=0.; self._last_session_time=0.
-        self._session_signature=''; self._selected_link=0; self._view_links: list[str]=[]
+        self._dirty_known=self.doc.dirty; self._last_recovery_time=0.; self._last_session_time=0.
+        self._session_signature=''; self._recovery_signature=''
         self.script_runner: ScriptRunner | None=None; self.script_task: asyncio.Task | None=None
         self._register_commands()
         if restore and self.store and self.config.get('session','restore'):
@@ -2914,11 +2948,99 @@ class Workspace:
         if isinstance(collapsed,list) and len(collapsed)<=4096:
             self.contents_collapsed={v for v in collapsed if isinstance(v,str) and len(v)<=256}
 
+    @staticmethod
+    def _path_key(path: Path) -> str:
+        return os.path.normcase(os.path.abspath(str(path)))
+
+    def _state_by_id(self, document_id: str | None) -> OpenDocumentState | None:
+        if not document_id: return None
+        return next((state for state in self.documents if state.id==document_id),None)
+
+    def _state_by_path(self, path: Path) -> OpenDocumentState | None:
+        key=self._path_key(path)
+        return next((state for state in self.documents
+                     if state.doc.path is not None and self._path_key(state.doc.path)==key),None)
+
+    def _active_state(self) -> OpenDocumentState:
+        state=self._state_by_id(self.active_document_id)
+        if state is None: raise MDBMError('No active document.')
+        return state
+
+    def _make_document_state(self, doc: DocumentModel, document_id: str | None = None,
+                             record: Mapping[str,Any] | None = None) -> OpenDocumentState:
+        doc.max_chars=self.files.max_bytes
+        ident=document_id if isinstance(document_id,str) and re.fullmatch(r'[0-9a-f]{32}',document_id) else uuid.uuid4().hex
+        state=OpenDocumentState(ident,doc)
+        if record is not None: self._restore_document_state_record(state,record)
+        return state
+
+    def _restore_document_state_record(self, state: OpenDocumentState, record: Mapping[str,Any]) -> None:
+        memories=record.get('memories',{})
+        if isinstance(memories,dict):
+            for tile in (Tile.EDIT,Tile.VIEW,Tile.CONTENTS):
+                item=memories.get(tile.value,{})
+                if not isinstance(item,dict): continue
+                memory=state.memories[tile]
+                for key in ('scroll','scroll_x','row'):
+                    value=item.get(key,0)
+                    if type(value) is int and 0<=value<=10000000: setattr(memory,key,value)
+                if isinstance(item.get('filter'),str) and len(item['filter'])<=1024:
+                    memory.filter=item['filter']
+        collapsed=record.get('contents_collapsed',[])
+        if isinstance(collapsed,list) and len(collapsed)<=4096:
+            state.contents_collapsed={v for v in collapsed if isinstance(v,str) and len(v)<=256}
+
+    def _restore_session_documents(self, saved: Mapping[str,Any]) -> str | None:
+        records=saved.get('documents',[])
+        if not isinstance(records,list) or len(records)>MAX_OPEN_DOCUMENTS: return None
+        used_ids:set[str]=set(); used_paths:set[str]=set()
+        for record in records:
+            if not isinstance(record,dict): continue
+            ident=record.get('id')
+            if not isinstance(ident,str) or not re.fullmatch(r'[0-9a-f]{32}',ident) or ident in used_ids:
+                ident=uuid.uuid4().hex
+            path=record.get('path')
+            try:
+                if path is None:
+                    doc=DocumentModel()
+                elif isinstance(path,str) and len(path)<=4096:
+                    target=self.files.resolve(path)
+                    key=self._path_key(target)
+                    if key in used_paths: continue
+                    used_paths.add(key)
+                    doc=DocumentModel.loaded(self.files.load(target)) if target.exists() else DocumentModel('',target)
+                else: continue
+            except (OSError,PathError,ConflictError) as exc:
+                self.diagnostics.append('Session document not opened: '+display_text(exc)); continue
+            for key in ('cursor','anchor'):
+                value=record.get(key)
+                if type(value) is int: setattr(doc,key,max(0,min(len(doc.text),value)))
+            state=self._make_document_state(doc,ident,record)
+            self.documents.append(state); used_ids.add(state.id)
+        active=saved.get('active_document')
+        return active if isinstance(active,str) and self._state_by_id(active) else (self.documents[0].id if self.documents else None)
+
+    def _document_session_record(self, state: OpenDocumentState) -> dict[str,Any]:
+        return {'id':state.id,'path':str(state.doc.path) if state.doc.path else None,
+                'cursor':state.doc.cursor,'anchor':state.doc.anchor,
+                'memories':{t.value:{'scroll':state.memories[t].scroll,
+                                     'scroll_x':state.memories[t].scroll_x,
+                                     'row':state.memories[t].row,
+                                     'filter':state.memories[t].filter}
+                            for t in (Tile.EDIT,Tile.VIEW,Tile.CONTENTS)},
+                'contents_collapsed':sorted(state.contents_collapsed)[:4096]}
+
     def session_data(self) -> dict[str,Any]:
-        return {'schema':'mdbm-session/1.0','root':str(self.files.root),
-                'active_file':str(self.doc.path) if self.doc.path else None,'theme':self._committed_theme_id,
+        self._sync_active_state()
+        active=self._active_state()
+        return {'schema':'mdbm-session/2.0','root':str(self.files.root),
+                'active_document':active.id,
+                'documents':[self._document_session_record(state) for state in self.documents[:MAX_OPEN_DOCUMENTS]],
+                # Legacy breadcrumbs are retained for diagnostics and downgrade inspection.
+                'active_file':str(active.doc.path) if active.doc.path else None,
+                'cursor':active.doc.cursor,'anchor':active.doc.anchor,
+                'theme':self._committed_theme_id,
                 'layout':{k:(v.value if isinstance(v,Tile) else v) for k,v in dataclasses.asdict(self.layout).items()},
-                'cursor':self.doc.cursor,'anchor':self.doc.anchor,
                 'memories':{t.value:{'scroll':m.scroll,'scroll_x':m.scroll_x,'row':m.row,'filter':m.filter,
                                      'expanded':sorted(m.expanded)[:4096]} for t,m in self.memories.items()},
                 'contents_collapsed':sorted(self.contents_collapsed)[:4096]}
@@ -2929,17 +3051,69 @@ class Workspace:
         if signature!=self._session_signature:
             self.store.write('session.json',record); self._session_signature=signature
 
+    def _recovery_document_record(self, state: OpenDocumentState) -> dict[str,Any]:
+        doc=state.doc
+        return {'document_id':state.id,'path':str(doc.path) if doc.path else None,
+                'text':doc.text,'digest':doc.digest,'baseline':doc._baseline,
+                'fingerprint':dataclasses.asdict(doc.fingerprint) if doc.fingerprint else None,
+                'cursor':doc.cursor,'anchor':doc.anchor,'newline':doc.newline,'bom':doc.bom,
+                'memories':{t.value:{'scroll':state.memories[t].scroll,
+                                     'scroll_x':state.memories[t].scroll_x,
+                                     'row':state.memories[t].row,
+                                     'filter':state.memories[t].filter}
+                            for t in (Tile.EDIT,Tile.VIEW,Tile.CONTENTS)},
+                'contents_collapsed':sorted(state.contents_collapsed)[:4096]}
+
+    def recovery_data(self) -> dict[str,Any] | None:
+        self._sync_active_state()
+        dirty=[state for state in self.documents if state.doc.dirty]
+        if not dirty: return None
+        return {'schema':'mdbm-recovery/2.0','root':str(self.files.root),
+                'active_document':self.active_document_id,
+                'documents':[self._recovery_document_record(state) for state in dirty],
+                'timestamp':time.time()}
+
+    def persist_recovery(self) -> None:
+        if not self.store: return
+        record=self.recovery_data()
+        signature=json.dumps(record,sort_keys=True) if record is not None else ''
+        if signature==self._recovery_signature: return
+        if record is None: self.store.clear_recovery()
+        else: self.store.write(self.store.recovery_name,record)
+        self._recovery_signature=signature
+
     def _offer_recovery(self, active: Path | None) -> None:
         assert self.store is not None
         for name,record in self.store.recovery_candidates(self.files.max_bytes):
             if record.get('root')!=str(self.files.root): continue
+            schema=record.get('schema')
+            if schema=='mdbm-recovery/2.0':
+                docs=record.get('documents')
+                if not isinstance(docs,list) or not docs: continue
+                if active is not None and not any(isinstance(item,dict) and item.get('path')==str(active) for item in docs):
+                    continue
+                def restore_bundle(r: dict[str,Any]=record,n: str=name,a: Path | None=active) -> None:
+                    try:
+                        self.restore_recovery_bundle(r,a)
+                        self.persist_recovery()
+                        if n!=self.store.recovery_name:
+                            with contextlib.suppress(OSError,MDBMError): self.store._path(n).unlink()
+                    except (MDBMError,UnicodeError,ValueError) as exc:
+                        self.info('Recovery rejected',display_text(exc))
+                def discard_bundle(n: str=name) -> None:
+                    with contextlib.suppress(OSError,MDBMError): self.store._path(n).unlink()
+                count=sum(1 for item in docs if isinstance(item,dict))
+                self.confirm('Unsaved recovery found',
+                             f'Recover unsaved text for {count} document(s)? Source files will not be overwritten.',
+                             [('Restore',restore_bundle),('Discard snapshot',discard_bundle),('Later',None)],default=2)
+                break
+            if schema!='mdbm-recovery/1.0': continue
             if active is not None and record.get('path')!=str(active): continue
             if not isinstance(record.get('text'),str) or len(record['text'])>self.files.max_bytes: continue
             def restore_record(r: dict[str,Any]=record,n: str=name) -> None:
                 try:
                     self.restore_recovery(r)
-                    # Successful adoption rehomes an isolated snapshot; never write source here.
-                    self.store.recovery(self.doc,self.files.root)
+                    self.persist_recovery()
                     if n!=self.store.recovery_name:
                         with contextlib.suppress(OSError,MDBMError): self.store._path(n).unlink()
                 except (MDBMError,UnicodeError,ValueError) as exc: self.info('Recovery rejected',display_text(exc))
@@ -2950,9 +3124,7 @@ class Workspace:
                          [('Restore',restore_record),('Discard snapshot',discard),('Later',None)],default=2)
             break
 
-    def restore_recovery(self, record: Mapping[str,Any]) -> None:
-        if record.get('schema')!='mdbm-recovery/1.0' or record.get('root')!=str(self.files.root):
-            raise MDBMError('Recovery belongs to a different workspace.')
+    def _document_from_recovery(self, record: Mapping[str,Any]) -> DocumentModel:
         text=record.get('text')
         if not isinstance(text,str) or len(text.encode('utf-8'))>self.files.max_bytes:
             raise MDBMError('Recovery source is invalid or over budget.')
@@ -2970,8 +3142,50 @@ class Workspace:
         for key in ('cursor','anchor'):
             value=record.get(key)
             if type(value) is int: setattr(doc,key,max(0,min(len(text),value)))
+        return doc
+
+    def restore_recovery(self, record: Mapping[str,Any]) -> None:
+        if record.get('schema')!='mdbm-recovery/1.0' or record.get('root')!=str(self.files.root):
+            raise MDBMError('Recovery belongs to a different workspace.')
+        doc=self._document_from_recovery(record)
         self.set_document(doc,clear_recovery=False)
         self.status('Recovery restored in memory; Save still checks the old disk fingerprint.')
+
+    def restore_recovery_bundle(self, record: Mapping[str,Any], only_path: Path | None = None) -> None:
+        if record.get('schema')!='mdbm-recovery/2.0' or record.get('root')!=str(self.files.root):
+            raise MDBMError('Recovery belongs to a different workspace.')
+        records=record.get('documents')
+        if not isinstance(records,list) or not records or len(records)>MAX_OPEN_DOCUMENTS:
+            raise MDBMError('Recovery document set is invalid.')
+        restored: list[OpenDocumentState]=[]
+        for item in records:
+            if not isinstance(item,dict): raise MDBMError('Recovery document record is invalid.')
+            doc=self._document_from_recovery(item)
+            if only_path is not None and (doc.path is None or self._path_key(doc.path)!=self._path_key(only_path)):
+                continue
+            ident=item.get('document_id')
+            by_path=self._state_by_path(doc.path) if doc.path is not None else None
+            by_id=self._state_by_id(ident) if isinstance(ident,str) else None
+            target=by_path
+            if target is None and by_id is not None:
+                same_path=(by_id.doc.path is None and doc.path is None) or (
+                    by_id.doc.path is not None and doc.path is not None and
+                    self._path_key(by_id.doc.path)==self._path_key(doc.path))
+                if same_path: target=by_id
+            if target is None:
+                if len(self.documents)>=MAX_OPEN_DOCUMENTS: raise MDBMError('Recovery exceeds the open-document limit.')
+                target=self._make_document_state(doc,ident if isinstance(ident,str) else None,item)
+                self.documents.append(target)
+            else:
+                target.doc=doc; target.parsed=None; target.preview=None; target.requested_parse=None
+                target.selected_link=-1; target.view_links=[]
+                self._restore_document_state_record(target,item)
+            restored.append(target)
+        if not restored: raise MDBMError('Recovery contains no document applicable to this launch.')
+        preferred=record.get('active_document')
+        target=self._state_by_id(preferred) if isinstance(preferred,str) and any(x.id==preferred for x in restored) else restored[-1]
+        self.activate_document(target.id)
+        self.status('Recovery restored in memory; Save still checks each document disk fingerprint.')
 
     def invalidate(self) -> None:
         if self.app is not None: self.app.invalidate()
@@ -3011,69 +3225,163 @@ class Workspace:
         index=visible.index(self.layout.focus) if self.layout.focus in visible else 0
         self.set_layout('focus',visible[(index+direction)%len(visible)])
 
+    def _sync_active_state(self) -> None:
+        state=self._state_by_id(self.active_document_id)
+        if state is None: return
+        state.doc=self.doc
+        state.memories={t:self.memories[t] for t in (Tile.EDIT,Tile.VIEW,Tile.CONTENTS)}
+        state.contents_collapsed=self.contents_collapsed
+        state.parsed=self.parsed; state.preview=self.preview
+        state.requested_parse=self.requested_parse
+        state.selected_link=self._selected_link; state.view_links=list(self._view_links)
+
+    def _bind_document_state(self, state: OpenDocumentState, emit: bool = True) -> None:
+        self.active_document_id=state.id; self.doc=state.doc; self.doc.max_chars=self.files.max_bytes
+        for tile in (Tile.EDIT,Tile.VIEW,Tile.CONTENTS): self.memories[tile]=state.memories[tile]
+        self.contents_collapsed=state.contents_collapsed
+        if state.parsed is None or state.preview is None:
+            self.parsed=ParsedMarkdown(-1,(PreviewBlock('empty',0,1,(Span('Preparing Markdown preview…','muted'),)),),())
+            self.preview=make_preview_layout(self.parsed,self.preview_width,self.config.ascii)
+        else:
+            self.parsed=state.parsed; self.preview=state.preview
+        self.requested_parse=state.requested_parse
+        self._selected_link=state.selected_link; self._view_links=list(state.view_links)
+        if hasattr(self,'_dirty_known'): self._dirty_known=self.doc.dirty
+        if emit:
+            self.emit('file-activate'); self.invalidate()
+
+    def activate_document(self, document_id: str) -> OpenDocumentState:
+        target=self._state_by_id(document_id)
+        if target is None: raise MDBMError('Document is no longer open.')
+        if target.id==self.active_document_id: return target
+        self._sync_active_state()
+        self._bind_document_state(target)
+        return target
+
     def set_document(self, doc: DocumentModel, clear_recovery: bool = True) -> None:
-        doc.generation=self.doc.generation+1
-        self.doc=doc; self.doc.max_chars=self.files.max_bytes
-        for tile in (Tile.EDIT,Tile.VIEW,Tile.CONTENTS):
-            self.memories[tile].scroll=0; self.memories[tile].scroll_x=0; self.memories[tile].row=0
-        self.contents_collapsed.clear(); self._selected_link=-1; self._view_links=[]
-        self.requested_parse=None; self._last_recovery_gen=-1; self._dirty_known=doc.dirty
-        if self.store and clear_recovery: self.store.clear_recovery()
-        self.emit('file-activate'); self.invalidate()
+        state=self._active_state()
+        doc.generation=self.doc.generation+1; doc.max_chars=self.files.max_bytes
+        state.doc=doc
+        state.memories={Tile.EDIT:TileMemory(),Tile.VIEW:TileMemory(),Tile.CONTENTS:TileMemory()}
+        state.contents_collapsed=set(); state.parsed=None; state.preview=None
+        state.requested_parse=None; state.selected_link=-1; state.view_links=[]
+        self._bind_document_state(state)
+        if self.store and clear_recovery: self.persist_recovery()
+
+    def _append_document(self, doc: DocumentModel, record: Mapping[str,Any] | None = None,
+                         document_id: str | None = None) -> OpenDocumentState:
+        if len(self.documents)>=MAX_OPEN_DOCUMENTS:
+            raise MDBMError(f'At most {MAX_OPEN_DOCUMENTS} documents may be open at once.')
+        self._sync_active_state()
+        state=self._make_document_state(doc,document_id,record); self.documents.append(state)
+        self._bind_document_state(state)
+        return state
 
     def open_path(self, path: str | Path, fragment: str = '') -> None:
         target=self.files.resolve(path)
         if target.is_dir():
             self.change_root(target); return
-        def perform() -> None:
-            loaded=self.files.load(target)
-            self.set_document(DocumentModel.loaded(loaded)); self.set_layout('focus',Tile.EDIT)
+        existing=self._state_by_path(target)
+        if existing is not None:
+            self.activate_document(existing.id); self.set_layout('focus',Tile.EDIT)
             if fragment:
-                parsed,preview=parse_and_layout(self.doc.text,self.doc.generation,self.preview_width,self.config.ascii)
-                self.accept_preview(self.doc.generation,self.preview_width,(parsed,preview))
+                if self.preview.generation!=self.doc.generation: self.parse_sync()
                 self.jump_anchor(fragment)
-            self.status('Opened '+str(target.relative_to(self.files.root)))
-        self.guard_dirty(perform)
+            self.status('Already open · '+str(target.relative_to(self.files.root)))
+            return
+        loaded=self.files.load(target)
+        self._append_document(DocumentModel.loaded(loaded)); self.set_layout('focus',Tile.EDIT)
+        if fragment:
+            self.parse_sync(); self.jump_anchor(fragment)
+        self.status('Opened '+str(target.relative_to(self.files.root)))
 
-    def guard_dirty(self, action: Callable[[],None]) -> None:
-        if not self.doc.dirty: action(); return
-        self.confirm('Unsaved changes','Save changes before continuing?',
+    def guard_document_dirty(self, state: OpenDocumentState, action: Callable[[],None]) -> None:
+        if not state.doc.dirty: action(); return
+        self.activate_document(state.id)
+        label=state.doc.path.name if state.doc.path else 'untitled document'
+        self.confirm('Unsaved changes','Save changes to '+display_text(label)+' before continuing?',
                      [('Save',lambda:self.save(after=action)),('Discard',action),('Cancel',None)],default=2)
 
+    def guard_dirty(self, action: Callable[[],None]) -> None:
+        self.guard_document_dirty(self._active_state(),action)
+
+    def guard_documents(self, document_ids: Sequence[str], action: Callable[[],None]) -> None:
+        pending=[ident for ident in document_ids if self._state_by_id(ident) is not None]
+        if not pending: action(); return
+        state=self._state_by_id(pending[0])
+        assert state is not None
+        self.guard_document_dirty(state,lambda:self.guard_documents(pending[1:],action))
+
     def new_document(self) -> None:
-        self.guard_dirty(lambda:(self.set_document(DocumentModel()),self.set_layout('focus',Tile.EDIT),self.status('New unsaved document')))
+        self._append_document(DocumentModel()); self.set_layout('focus',Tile.EDIT)
+        self.status('New unsaved document')
+
+    def _drop_document_states(self, document_ids: Sequence[str]) -> None:
+        ids=set(document_ids)
+        if not ids: return
+        self._sync_active_state()
+        prior_index=next((i for i,state in enumerate(self.documents) if state.id==self.active_document_id),0)
+        self.documents=[state for state in self.documents if state.id not in ids]
+        if not self.documents:
+            self.documents.append(self._make_document_state(DocumentModel()))
+        target=self.documents[min(prior_index,len(self.documents)-1)]
+        self._bind_document_state(target)
+        if self.store: self.persist_recovery()
+
+    def close_document(self, document_id: str | None = None) -> None:
+        state=self._state_by_id(document_id or self.active_document_id)
+        if state is None: return
+        def close() -> None:
+            label=state.doc.path.name if state.doc.path else 'Untitled'
+            self._drop_document_states([state.id]); self.status('Closed '+display_text(label))
+        self.guard_document_dirty(state,close)
 
     def change_root(self, path: Path) -> None:
         new_files=SafeFiles(path,self.files.max_bytes)
         new_files.protected_paths=(self.config.path('application','state_directory').absolute(),)
         def perform() -> None:
             self.files=new_files; self.tree_cache=None
-            self.memories[Tile.FILESYSTEM]=TileMemory(); self.set_document(DocumentModel())
+            self.memories[Tile.FILESYSTEM]=TileMemory(); self.documents=[]
+            state=self._make_document_state(DocumentModel()); self.documents.append(state)
+            self._bind_document_state(state)
             self.set_layout('focus',Tile.FILESYSTEM); self.status('Workspace root changed.')
-        self.guard_dirty(perform)
+            if self.store: self.persist_recovery()
+        self.guard_documents([state.id for state in self.documents if state.doc.dirty],perform)
 
     def save(self, as_new: bool = False, after: Callable[[],None] | None = None) -> None:
-        if as_new or self.doc.path is None:
-            initial=str(self.doc.path.relative_to(self.files.root)) if self.doc.path else 'untitled.md'
+        state=self._active_state(); document_id=state.id; doc=state.doc
+        if as_new or doc.path is None:
+            initial=str(doc.path.relative_to(self.files.root)) if doc.path else 'untitled.md'
             def accept(value: str) -> None:
                 target=self.files.resolve(value)
-                self.perform_save(target,self.doc.fingerprint if target==self.doc.path else None,after)
+                self.perform_save(target,doc.fingerprint if target==doc.path else None,after,document_id)
             self.request_text('Save As',initial,accept,'Path relative to the workspace. Existing files require confirmation.')
-        else: self.perform_save(self.doc.path,self.doc.fingerprint,after)
+        else:
+            self.perform_save(doc.path,doc.fingerprint,after,document_id)
 
-    def perform_save(self, path: Path, expected: Fingerprint | None, after: Callable[[],None] | None = None) -> None:
+    def perform_save(self, path: Path, expected: Fingerprint | None,
+                     after: Callable[[],None] | None = None, document_id: str | None = None) -> None:
+        state=self._state_by_id(document_id or self.active_document_id)
+        if state is None: raise MDBMError('Document is no longer open.')
+        doc=state.doc; other=self._state_by_path(path)
+        if other is not None and other.id!=state.id:
+            raise MDBMError('That destination is already open in another document.')
         try:
-            fingerprint=self.files.save(path,self.doc.text,expected,self.doc.newline,self.doc.bom)
+            fingerprint=self.files.save(path,doc.text,expected,doc.newline,doc.bom)
         except ConflictError as exc:
             observed=self.files.fingerprint(path)
             self.emit('save-failure')
+            self.activate_document(state.id)
             self.confirm('File conflict',str(exc)+'\nDestination: '+display_text(path),
-                [('Overwrite',lambda:self.perform_save(path,observed,after)),
-                 ('Save As',lambda:self.save(as_new=True,after=after)),('Cancel',None)],default=2)
+                [('Overwrite',lambda:self.perform_save(path,observed,after,state.id)),
+                 ('Save As',lambda:(self.activate_document(state.id),self.save(as_new=True,after=after))),
+                 ('Cancel',None)],default=2)
             return
-        self.doc.path=path; self.doc.mark_saved(fingerprint)
-        if self.store: self.store.clear_recovery()
-        self.tree_cache=None; self.emit('save-success'); self.status('Saved '+str(path.relative_to(self.files.root)))
+        doc.path=path; doc.mark_saved(fingerprint)
+        self.tree_cache=None
+        if state.id==self.active_document_id:
+            self.emit('save-success'); self.status('Saved '+str(path.relative_to(self.files.root)))
+        if self.store: self.persist_recovery()
         if after: after()
 
     def request_quit(self) -> None:
@@ -3082,7 +3390,19 @@ class Workspace:
             self.confirm('Script still running','Cancel the running script before exiting?',
                          [('Cancel script',lambda:self.cancel_script_then_quit()),('Stay',None)],default=1)
             return
-        self.guard_dirty(self._exit)
+        dirty=[state.id for state in self.documents if state.doc.dirty]
+        self._guard_quit_documents(dirty)
+
+    def _guard_quit_documents(self, document_ids: Sequence[str]) -> None:
+        pending=[ident for ident in document_ids if (self._state_by_id(ident) and self._state_by_id(ident).doc.dirty)]
+        if not pending: self._exit(); return
+        state=self._state_by_id(pending[0]); assert state is not None
+        self.activate_document(state.id)
+        label=state.doc.path.name if state.doc.path else 'untitled document'
+        rest=pending[1:]
+        self.confirm('Unsaved changes','Save changes to '+display_text(label)+' before quitting?',
+                     [('Save',lambda:self.save(after=lambda:self._guard_quit_documents(rest))),
+                      ('Discard',lambda:self._guard_quit_documents(rest)),('Cancel',None)],default=2)
 
     def _exit(self) -> None:
         self.clean_exit=True; self.exit_requested=True
@@ -3092,7 +3412,7 @@ class Workspace:
     def cancel_script_then_quit(self) -> None:
         async def finish() -> None:
             if self.script_runner: await self.script_runner.cancel()
-            self.guard_dirty(self._exit)
+            self.request_quit()
         self.create_task(finish())
 
     def create_task(self, coro: Any) -> asyncio.Task | None:
@@ -3215,6 +3535,7 @@ class Workspace:
         r.add('file.open','Open file…',lambda p:self.request_text('Open file','',self.open_path,'UTF-8 path relative to this workspace.'),['c-o'],'File')
         r.add('file.save','Save',lambda p:self.save(),['c-s'],'File')
         r.add('file.save_as','Save As…',lambda p:self.save(True),['f4'],'File')
+        r.add('file.close','Close document',lambda p:self.close_document(),[],'File')
         r.add('file.root','Change workspace root…',lambda p:self.request_text('Workspace root',str(self.files.root),lambda v:self.change_root(Path(v).expanduser())),[],'File')
         r.add('file.mkdir','New directory…',lambda p:self.request_text('New directory','new-folder',lambda v:(self.files.mkdir(v),self.refresh_tree())),[],'File')
         r.add('file.rename','Rename / move selected item…',lambda p:self.rename_selected(),['f2'],'File')
@@ -3426,31 +3747,32 @@ class Workspace:
         if src is None: self.status('No filesystem item selected.'); return
         initial=str(src.relative_to(self.files.root))
         def perform(value: str) -> None:
-            old_path=self.doc.path
-            baseline=self.doc.fingerprint
-            affected=bool(old_path and (old_path==src or old_path.is_relative_to(src)))
-            before=self.files.fingerprint(old_path) if affected else None
+            affected=[state for state in self.documents if state.doc.path is not None and
+                      (state.doc.path==src or state.doc.path.is_relative_to(src))]
+            before={state.id:self.files.fingerprint(state.doc.path) for state in affected}
+            baselines={state.id:state.doc.fingerprint for state in affected}
             dst=self.files.move(src,value)
-            if old_path and (old_path==src or old_path.is_relative_to(src)):
-                relative=old_path.relative_to(src)
-                self.doc.path=dst/relative if relative.parts else dst
-                # A copied move changes inode/mtime. Rebase only when the source
-                # still matched the loaded baseline; never bless an external edit.
-                if before==baseline:
-                    self.doc.fingerprint=self.files.fingerprint(self.doc.path)
+            for state in affected:
+                assert state.doc.path is not None
+                relative=state.doc.path.relative_to(src)
+                state.doc.path=dst/relative if relative.parts else dst
+                if before[state.id]==baselines[state.id]:
+                    state.doc.fingerprint=self.files.fingerprint(state.doc.path)
             self.refresh_tree(); self.status('Moved to '+str(dst.relative_to(self.files.root)))
         self.request_text('Rename / move',initial,perform,'Destination relative to workspace; existing targets are not overwritten.')
 
     def trash_selected(self) -> None:
         path=self.selected_path()
         if path is None: self.status('No filesystem item selected.'); return
-        affects=self.doc.path is not None and (self.doc.path==path or self.doc.path.is_relative_to(path))
+        affected=[state.id for state in self.documents if state.doc.path is not None and
+                  (state.doc.path==path or state.doc.path.is_relative_to(path))]
         def actual() -> None:
             self.files.trash(path)
-            if affects: self.set_document(DocumentModel())
+            self._drop_document_states(affected)
             self.refresh_tree(); self.status('Moved to system trash.')
         def confirmed() -> None:
-            self.guard_dirty(actual) if affects else actual()
+            self.guard_documents([ident for ident in affected
+                                  if self._state_by_id(ident) and self._state_by_id(ident).doc.dirty],actual)
         self.confirm('Move to trash?',display_text(path)+'\nNo permanent-delete fallback is used.',
                      [('Trash',confirmed),('Cancel',None)],default=1)
 
@@ -3548,7 +3870,7 @@ class Workspace:
             suffix='  '+command.keys[0] if command.keys else ''
             return MenuItem(label or command.label+suffix,cid)
         if name=='File':
-            return [item(cid) for cid in ('file.new','file.open','file.save','file.save_as','file.mkdir','file.rename','file.trash','file.root','file.quit')]
+            return [item(cid) for cid in ('file.new','file.open','file.save','file.save_as','file.close','file.mkdir','file.rename','file.trash','file.root','file.quit')]
         if name=='Edit':
             return [item(cid) for cid in ('edit.undo','edit.redo','edit.copy','edit.cut','edit.paste','edit.select_all','edit.find','edit.replace','edit.insert_tab','edit.profile')]
         if name=='Tile':
@@ -4430,11 +4752,13 @@ class Workspace:
         if self.worker:
             result=self.worker.poll()
             if result:
-                generation,width,payload=result
-                if self.accept_preview(generation,width,payload): self.invalidate()
+                document_id,generation,width,payload=result
+                if document_id==self.active_document_id and self.accept_preview(generation,width,payload):
+                    self.invalidate()
             desired=(self.doc.generation,self.preview_width)
             if desired!=self.requested_parse and now-self.doc.last_edit>=self.config.get('session','parse_debounce_ms')/1000:
-                self.worker.request(self.doc.text,*desired,self.config.ascii); self.requested_parse=desired
+                self.worker.request(self.active_document_id,self.doc.text,*desired,self.config.ascii)
+                self.requested_parse=desired
         if self.capture and self.capture.kind=='editor' and self.geometry and Tile.EDIT in self.geometry.contents:
             rect=self.geometry.contents[Tile.EDIT]; x,y=self.capture.pointer
             delta=-1 if y<rect.y else 1 if y>=rect.bottom else 0
@@ -4454,9 +4778,8 @@ class Workspace:
                     del self.overlays[index+1:]; self.invalidate(); break
         if self.store:
             try:
-                if self.doc.dirty and self.doc.generation!=self._last_recovery_gen and now-self._last_recovery_time>=self.config.get('session','recovery_seconds'):
-                    self.store.recovery(self.doc,self.files.root)
-                    self._last_recovery_gen=self.doc.generation; self._last_recovery_time=now
+                if now-self._last_recovery_time>=self.config.get('session','recovery_seconds'):
+                    self.persist_recovery(); self._last_recovery_time=now
                 if now-self._last_session_time>=self.config.get('session','save_seconds'):
                     self.persist_session(); self._last_session_time=now
             except (MDBMError,OSError) as exc:
@@ -4490,7 +4813,7 @@ class Workspace:
             if self.worker: self.worker.close()
             if self.store:
                 try:
-                    if self.doc.dirty and not self.clean_exit: self.store.recovery(self.doc,self.files.root)
+                    if not self.clean_exit: self.persist_recovery()
                     self.persist_session()
                 except (MDBMError,OSError) as exc:
                     self.diagnostics.append('Shutdown recovery failed: '+display_text(exc))
