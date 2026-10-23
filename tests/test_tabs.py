@@ -50,6 +50,14 @@ def test_labels_active_dirty_disambiguation_and_three_tabs(tmp_path):
     assert w.registry.parity_errors(w.hits)==[]
 
 
+def test_multiple_untitled_documents_have_stable_readable_labels(tmp_path):
+    w=make_workspace(tmp_path)
+    w.set_document(m.DocumentModel())
+    w.new_document(); w.new_document()
+    assert [label for _,label in w.document_tab_labels()]==[
+        'Untitled','Untitled 2','Untitled 3']
+
+
 def test_next_previous_cycle_in_document_order(tmp_path):
     paths=[tmp_path/f'{name}.md' for name in ('a','b','c')]
     for path in paths: path.write_text(path.stem)
