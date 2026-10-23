@@ -4441,7 +4441,7 @@ class Workspace:
                 if duplicate: existing+=1
                 else: opened+=1
             except (MDBMError,OSError,ValueError) as exc:
-                label=display_text(path,limit=120)
+                label=display_text(Path(path).name or path,limit=120)
                 reason=display_text(str(exc),limit=200)
                 rejected.append((label,reason))
                 self.diagnostics.append('Drop rejected: '+label+' · '+reason)
