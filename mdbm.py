@@ -312,6 +312,74 @@ def clean_paste(text: str) -> str:
     return ''.join(c for c in text if not unsafe_codepoint(c, allow_layout=True))
 
 
+# Deliberately not shlex: a terminal drop is pasted text, not a shell command.
+# Reject ambiguous syntax rather than importing shell quoting/expansion semantics.
+def parse_terminal_paths(payload: str) -> list[str] | None:
+    """Parse conservative bracketed-paste file paths, without filesystem I/O.
+
+    Only a single unquoted path, individually quoted paths, or explicit lines
+    of paths are recognized. Unquoted POSIX backslash-space is supported;
+    every other unquoted escape is refused. Windows backslashes are literal.
+    """
+    if not isinstance(payload,str) or not payload or len(payload)>16384:
+        return None
+    data=payload.replace('\r\n','\n')
+    if any(ch!='\n' and unsafe_codepoint(ch) for ch in data):
+        return None
+    data=data.strip(' \n')
+    if not data: return None
+
+    result: list[str]=[]
+    for line in data.split('\n'):
+        line=line.strip(' ')
+        if not line: return None
+        parts: list[tuple[str,bool]]=[]
+        if line[0] in ('"',"'"):
+            index=0
+            while index<len(line):
+                while index<len(line) and line[index]==' ': index+=1
+                if index==len(line): break
+                if line[index] not in ('"',"'"): return None
+                quote=line[index]; index+=1
+                end=line.find(quote,index)
+                if end<0 or end==index: return None
+                parts.append((line[index:end],True))
+                index=end+1
+                if index<len(line) and line[index]!=' ': return None
+        else:
+            if '"' in line or "'" in line: return None
+            # Drive paths must retain backslashes; POSIX backslash-space is
+            # the only unquoted escape accepted.
+            if re.match(r'^[A-Za-z]:[\\/]',line):
+                parts.append((line,False))
+            else:
+                chars=[]; index=0
+                while index<len(line):
+                    if line[index]=='\\':
+                        if index+1>=len(line) or line[index+1]!=' ':
+                            return None
+                        chars.append(' '); index+=2
+                    else:
+                        chars.append(line[index]); index+=1
+                parts.append((''.join(chars),False))
+        for path,quoted in parts:
+            if not path or len(path)>4096: return None
+            # A lone word is indistinguishable from a Vim command/text paste.
+            # An explicit quote or a path marker is necessary for ingress.
+            if not quoted and not any(mark in path for mark in ('/','\\','.')):
+                return None
+            # No shell operators, substitutions, interpolations or globs.
+            if any(ch in '$|&;<>*?{}[]()!%~^#' or ord(ch)==96 for ch in path):
+                return None
+            if '://' in path or path.casefold().startswith(
+                    ('file:','http:','https:','ftp:','sftp:','ssh:','data:')):
+                return None
+            if path.startswith('-'): return None
+            result.append(path)
+            if len(result)>MAX_OPEN_DOCUMENTS: return None
+    return result or None
+
+
 def width_of(text: str, ascii_only: bool = False, tab_size: int = 4) -> int:
     return sum(u.width for u in display_units(text, ascii_only, tab_size))
 
@@ -2807,6 +2875,10 @@ Alt+F / E / T / N / H / S / ? Ribbon menus (also use F10)
 Alt+[ / Alt+]                 Narrow / widen left column
 Alt+- / Alt+=                 Shrink / grow View
 
+Outside text entry: terminal-dropped local paths may open files when
+bracketed paste is unambiguous. Paste into active Edit insertion remains text.
+Terminal support varies: no portable native OS drag/drop event is available.
+
 Edit: arrows, Home/End, Ctrl+Home/End, Shift navigation,
 Ctrl+Left/Right, Backspace/Delete, Enter and bracketed paste.
 Ctrl+A select all; Ctrl+C/X/V application clipboard; Ctrl+Z/Y undo/redo.
@@ -4340,6 +4412,45 @@ class Workspace:
             elif key=='c-y': doc.redo()
             if overlay.kind=='palette': overlay.index=0; self.palette_items(overlay)
 
+    def paste_path_ingress_enabled(self) -> bool:
+        """Only non-text-entry workspace contexts may interpret terminal paste."""
+        if self.overlays: return False
+        if self.layout.focus!=Tile.EDIT: return True
+        return self.config.get('input','profile')=='vim' and self.vim_mode!='insert'
+
+    def open_pasted_paths(self, payload: str) -> bool:
+        """Route recognized paste through canonical #1 open_path, never a shell."""
+        paths=parse_terminal_paths(payload)
+        if paths is None: return False
+        opened=0; existing=0; rejected: list[tuple[str,str]]=[]
+        for path in paths:
+            try:
+                if os.name!='nt' and (re.match(r'^[A-Za-z]:[\\/]',path) or path.startswith('\\\\')):
+                    raise PathError('Windows paths cannot be opened on this platform.')
+                target=self.files.resolve(path)
+                if not target.exists():
+                    raise PathError('Dropped file does not exist.')
+                if not target.is_file():
+                    raise PathError('Only existing regular files may be dropped.')
+                duplicate=self._state_by_path(target) is not None
+                self.open_path(target)
+                if duplicate: existing+=1
+                else: opened+=1
+            except (MDBMError,OSError,ValueError) as exc:
+                label=display_text(path,limit=120)
+                reason=display_text(str(exc),limit=200)
+                rejected.append((label,reason))
+                self.diagnostics.append('Drop rejected: '+label+' · '+reason)
+        segments=[f'Opened {opened} file{"s" if opened!=1 else ""}']
+        if existing: segments.append(f'{existing} already open')
+        if rejected:
+            segments.append(f'{len(rejected)} rejected')
+            summary='; '.join(f'{name}: {reason}' for name,reason in rejected[:2])
+            if len(rejected)>2: summary+='; see diagnostics for remaining paths'
+            segments.append(summary)
+        self.status(' · '.join(segments),bool(rejected))
+        return True
+
     def handle_text(self, text: str, paste: bool = False) -> None:
         if not text: return
         if self.overlays:
@@ -4355,6 +4466,8 @@ class Workspace:
                 choices=[i for i,(label,_) in enumerate(overlay.actions) if label.casefold().startswith(text.casefold())]
                 if len(choices)==1: self.overlay_action({'row':choices[0]})
             self.invalidate(); return
+        if paste and self.paste_path_ingress_enabled() and self.open_pasted_paths(text):
+            return
         if self.layout.focus!=Tile.EDIT:
             if not paste and self.layout.focus==Tile.VIEW and text in ('n','p'):
                 self.dispatch('navigate.next_link' if text=='n' else 'navigate.previous_link')
