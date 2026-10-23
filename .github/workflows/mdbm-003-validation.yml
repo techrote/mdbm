@@ -26,4 +26,4 @@ jobs:
       - name: Compile MDBM source
         run: python -m py_compile mdbm.py
       - name: Full pytest suite
-        run: python -m pytest -q
+        run: python -m pytest -q --full-trace
