@@ -74,3 +74,32 @@ def test_pty_terminal_resize_and_focus_reports_do_not_edit(tmp_path):
         assert target.read_text()=='alpha beta\n'
     finally:
         if child.isalive():child.close(force=True)
+
+
+def test_pty_bracketed_path_paste_opens_document(tmp_path):
+    child,target,log=launch(tmp_path)
+    dropped=tmp_path/'dropped.md'; dropped.write_text('drop target\n')
+    try:
+        # Alt+1 focuses Filesystem: ordinary Edit insertion must be exited first.
+        child.send('\x1b1'); time.sleep(.12)
+        child.send('\x1b[200~'+str(dropped)+'\x1b[201~')
+        child.expect('drop target')
+        child.send('X'); time.sleep(.08); child.sendcontrol('s')
+        child.expect('Saved'); finish(child)
+        assert dropped.read_text()=='Xdrop target\n'
+        assert target.read_text()=='alpha beta\n'
+    finally:
+        if child.isalive(): child.close(force=True)
+
+
+def test_pty_bracketed_path_paste_in_edit_remains_text(tmp_path):
+    child,target,log=launch(tmp_path)
+    dropped=tmp_path/'another.md'; dropped.write_text('unchanged\n')
+    try:
+        child.send('\x1b[200~'+str(dropped)+'\x1b[201~')
+        time.sleep(.08); child.sendcontrol('s'); child.expect('Saved')
+        finish(child)
+        assert target.read_text()==str(dropped)+'alpha beta\n'
+        assert dropped.read_text()=='unchanged\n'
+    finally:
+        if child.isalive(): child.close(force=True)
