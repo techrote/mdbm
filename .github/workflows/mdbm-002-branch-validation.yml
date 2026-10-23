@@ -1,0 +1,27 @@
+name: MDBM-002 branch validation
+
+on:
+  push:
+    branches:
+      - impl/mdbm-002-tab-strip
+  workflow_dispatch:
+
+jobs:
+  pytest:
+    name: pytest (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install release and test dependencies
+        run: python -m pip install -U pip && python -m pip install -r requirements.txt && python -m pip install -e ".[test]"
+      - name: Run complete pytest suite
+        run: python -m pytest -q
