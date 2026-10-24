@@ -3018,6 +3018,7 @@ class Workspace:
         self.app: Application | None=None; self.worker: PreviewWorker | None=None
         self.notice='Ready · Ctrl+P for commands'; self.notice_error=False
         self.clipboard=''; self.search_term=''; self.search_replacement=''; self.vim_mode='normal' if self.config.get('input','profile')=='vim' else 'insert'
+        self.path_paste_armed=False  # Single-use explicit override for Edit insertion.
         self.last_click: tuple[float,int,int,str,int]=(0,-1,-1,'',0)
         self.hover_due: tuple[str,int,float] | None=None; self.hover_close_due: tuple[str,float] | None=None
         self.ribbon_active=False; self.ribbon_index=0; self.ribbon_regions: list[tuple[str,Rect]]=[]
@@ -3468,7 +3469,7 @@ class Workspace:
         return state
 
     def open_path(self, path: str | Path, fragment: str = '',
-                  *, allow_directory: bool = True) -> None:
+                  *, allow_directory: bool = True, focus_edit: bool = True) -> None:
         target=self.files.resolve(path)
         if target.is_dir():
             if not allow_directory:
@@ -3476,14 +3477,16 @@ class Workspace:
             self.change_root(target); return
         existing=self._state_by_path(target)
         if existing is not None:
-            self.activate_document(existing.id); self.set_layout('focus',Tile.EDIT)
+            self.activate_document(existing.id)
+            if focus_edit: self.set_layout('focus',Tile.EDIT)
             if fragment:
                 if self.preview.generation!=self.doc.generation: self.parse_sync()
                 self.jump_anchor(fragment)
             self.status('Already open · '+str(target.relative_to(self.files.root)))
             return
         loaded=self.files.load(target)
-        self._append_document(DocumentModel.loaded(loaded)); self.set_layout('focus',Tile.EDIT)
+        self._append_document(DocumentModel.loaded(loaded))
+        if focus_edit: self.set_layout('focus',Tile.EDIT)
         if fragment:
             self.parse_sync(); self.jump_anchor(fragment)
         self.status('Opened '+str(target.relative_to(self.files.root)))
@@ -3728,6 +3731,7 @@ class Workspace:
         r=self.registry
         r.add('file.new','New document',lambda p:self.new_document(),['c-n'],'File')
         r.add('file.open','Open file…',lambda p:self.request_text('Open file','',self.open_path,'UTF-8 path relative to this workspace.'),['c-o'],'File')
+        r.add('file.arm_drop','Arm next file-path paste',lambda p:self.arm_path_paste(),['f9'],'File')
         r.add('file.save','Save',lambda p:self.save(),['c-s'],'File')
         r.add('file.save_as','Save As…',lambda p:self.save(True),['f4'],'File')
         # Compatibility alias retained for existing configs; MDBM-002 exposes
