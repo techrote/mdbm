@@ -4045,6 +4045,9 @@ class Workspace:
     # Modal surfaces, ribbon, delayed nested menus and theme transactions
     # -------------------------------------------------------------------------
     def push_overlay(self, overlay: Overlay) -> None:
+        if self.path_paste_armed:
+            self.path_paste_armed=False
+            self.status('File-path capture cancelled · dialog opened')
         self.overlays.append(overlay); self.emit('menu-open'); self.invalidate()
 
     def close_overlay(self, cancel: bool = True) -> None:
@@ -4075,7 +4078,7 @@ class Workspace:
             suffix='  '+command.keys[0] if command.keys else ''
             return MenuItem(label or command.label+suffix,cid)
         if name=='File':
-            return [item(cid) for cid in ('file.new','file.open','file.save','file.save_as','document.close','file.mkdir','file.rename','file.trash','file.root','file.quit')]
+            return [item(cid) for cid in ('file.new','file.open','file.arm_drop','file.save','file.save_as','document.close','file.mkdir','file.rename','file.trash','file.root','file.quit')]
         if name=='Edit':
             return [item(cid) for cid in ('edit.undo','edit.redo','edit.copy','edit.cut','edit.paste','edit.select_all','edit.find','edit.replace','edit.insert_tab','edit.profile')]
         if name=='Tile':
@@ -4205,6 +4208,10 @@ class Workspace:
             overlay.editor.move_to(cell_to_offset(overlay.editor.text,column,self.config.ascii))
 
     def escape(self) -> None:
+        if self.path_paste_armed:
+            self.path_paste_armed=False
+            self.status('File-path capture cancelled')
+            return
         if self.capture:
             self.cancel_capture(); return
         if self.overlays:
@@ -4470,6 +4477,10 @@ class Workspace:
         self.invalidate()
 
     def handle_key(self, key: str, command: str) -> None:
+        if self.path_paste_armed and command!='file.arm_drop':
+            if command=='input.escape':
+                self.escape(); return
+            self.path_paste_armed=False
         if command in ('file.quit','tile.restore','command.palette'):
             self.dispatch(command); return
         if self.capture and command!='input.escape': self.cancel_capture()
@@ -4528,6 +4539,14 @@ class Workspace:
             elif key=='c-y': doc.redo()
             if overlay.kind=='palette': overlay.index=0; self.palette_items(overlay)
 
+    def arm_path_paste(self) -> None:
+        """Opt in once; ordinary Edit paste never opens files implicitly."""
+        if self.overlays:
+            self.status('Close the dialog before arming a file drop',True)
+            return
+        self.path_paste_armed=True
+        self.status('File-drop capture armed · drop/paste paths · Esc cancels')
+
     def paste_path_ingress_enabled(self) -> bool:
         """Only non-text-entry workspace contexts may interpret terminal paste."""
         if self.overlays: return False
@@ -4549,7 +4568,9 @@ class Workspace:
                 if not target.is_file():
                     raise PathError('Only existing regular files may be dropped.')
                 duplicate=self._state_by_path(target) is not None
-                self.open_path(target,allow_directory=False)
+                # Keep the original keyboard context: otherwise the first
+                # drop focuses Edit and the next identical drop inserts text.
+                self.open_path(target,allow_directory=False,focus_edit=False)
                 if duplicate: existing+=1
                 else: opened+=1
             except (MDBMError,OSError,ValueError) as exc:
@@ -4582,6 +4603,14 @@ class Workspace:
                 choices=[i for i,(label,_) in enumerate(overlay.actions) if label.casefold().startswith(text.casefold())]
                 if len(choices)==1: self.overlay_action({'row':choices[0]})
             self.invalidate(); return
+        if paste and self.path_paste_armed:
+            self.path_paste_armed=False
+            if not self.open_pasted_paths(text):
+                self.status('No unambiguous local file paths · document unchanged',True)
+            return
+        if self.path_paste_armed:
+            # Typing disarms without discarding normal editor/Vim input.
+            self.path_paste_armed=False
         if paste and self.paste_path_ingress_enabled() and self.open_pasted_paths(text):
             return
         if self.layout.focus!=Tile.EDIT:
