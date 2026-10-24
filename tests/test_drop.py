@@ -77,6 +77,7 @@ def test_workspace_paste_opens_local_file(tmp_path):
     assert w.active_document_id!=original and w.doc.path==b
     assert w.doc.text=='B'
     assert w.notice=='Opened 1 file'
+    assert w.layout.focus==m.Tile.FILESYSTEM  # Another drop remains eligible.
 
 
 def test_multiple_quoted_paths_preserve_order_and_active_identity(tmp_path):
@@ -240,3 +241,140 @@ def test_drop_directory_change_race_cannot_replace_workspace(tmp_path,monkeypatc
     assert w.files.root==tmp_path.resolve()
     assert len(w.documents)==1 and w.doc.path==a
     assert w.notice_error and 'Only existing regular files' in w.notice
+
+
+@pytest.mark.parametrize('origin',[m.Tile.FILESYSTEM,m.Tile.CONTENTS,m.Tile.VIEW])
+def test_repeated_drops_keep_ingress_tile_and_activate_final_tab(tmp_path,origin):
+    original=tmp_path/'original.md'; first=tmp_path/'first.md'; second=tmp_path/'second.md'
+    for path in (original,first,second): path.write_text(path.name)
+    w=workspace(tmp_path); start(w,original)
+    w.set_layout('focus',origin)
+    assert w.layout.focus==origin
+    for path in (first,second):
+        w.handle_text(str(path),paste=True)
+        assert w.layout.focus==origin
+        assert w.doc.path==path
+    assert len(w.documents)==3 and w.documents[-1].id==w.active_document_id
+    assert [state.doc.path for state in w.documents]==[original,first,second]
+    assert w._state_by_path(first).doc.text=='first.md'
+    w.frame(120,40)
+    assert any(h.command=='document.activate' and h.payload==w.active_document_id
+               for h in w.hits)
+
+
+def test_duplicate_drop_does_not_retarget_edit_focus(tmp_path):
+    original=tmp_path/'original.md'; original.write_text('original')
+    other=tmp_path/'other.md'; other.write_text('other')
+    w=workspace(tmp_path); start(w,original)
+    w.open_path(other)
+    w.set_layout('focus',m.Tile.VIEW)
+    w.handle_text(str(original),paste=True)
+    assert w.layout.focus==m.Tile.VIEW
+    assert w.doc.path==original and len(w.documents)==2
+
+
+def test_explicit_open_path_still_focuses_edit(tmp_path):
+    a=tmp_path/'a.md'; b=tmp_path/'b.md'
+    a.write_text('A'); b.write_text('B')
+    w=workspace(tmp_path); start(w,a)
+    w.set_layout('focus',m.Tile.FILESYSTEM)
+    w.open_path(b)
+    assert w.layout.focus==m.Tile.EDIT and w.doc.path==b
+
+
+def test_file_menu_and_f9_expose_single_use_drop_capture(tmp_path):
+    w=workspace(tmp_path)
+    assert w.registry.commands['file.arm_drop'].keys==('f9',)
+    assert any(item.command=='file.arm_drop' for item in w.menu_items('File'))
+    w.handle_key('f9','file.arm_drop')
+    assert w.path_paste_armed and 'armed' in w.notice
+
+
+def test_f9_open_in_edit_once_then_plain_paste_remains_text(tmp_path):
+    a=tmp_path/'a.md'; b=tmp_path/'b.md'; c=tmp_path/'c.md'
+    for path in (a,b,c): path.write_text(path.name)
+    w=workspace(tmp_path); start(w,a)
+    assert w.layout.focus==m.Tile.EDIT
+    w.handle_key('f9','file.arm_drop')
+    w.handle_text(str(b),paste=True)
+    assert len(w.documents)==2 and w.doc.path==b
+    assert not w.path_paste_armed and w.layout.focus==m.Tile.EDIT
+    w.handle_text(str(c),paste=True)
+    assert len(w.documents)==2 and w.doc.path==b
+    assert str(c) in w.doc.text and w.doc.dirty
+
+
+def test_f9_invalid_paste_refuses_without_adding_editor_text(tmp_path):
+    a=tmp_path/'a.md'; a.write_text('original')
+    w=workspace(tmp_path); start(w,a)
+    aid=w.active_document_id
+    w.arm_path_paste()
+    w.handle_text('echo hello; rm a.md',paste=True)
+    assert len(w.documents)==1 and w.active_document_id==aid
+    assert w.doc.text=='original' and not w.doc.dirty
+    assert not w.path_paste_armed and w.notice_error
+    assert 'document unchanged' in w.notice
+
+
+def test_f9_disallowed_target_does_not_insert_text(tmp_path):
+    a=tmp_path/'a.md'; a.write_text('original')
+    w=workspace(tmp_path); start(w,a)
+    outside=tmp_path.parent/'outside.md'; outside.write_text('outside')
+    w.arm_path_paste()
+    w.handle_text(str(outside),paste=True)
+    assert w.doc.path==a and w.doc.text=='original' and not w.doc.dirty
+    assert '1 rejected' in w.notice and not w.path_paste_armed
+
+
+def test_f9_escape_cancels_without_changing_vim_state(tmp_path):
+    w=workspace(tmp_path)
+    w.toggle_profile()
+    w.vim_mode='insert'
+    w.arm_path_paste()
+    w.handle_key('escape','input.escape')
+    assert not w.path_paste_armed
+    assert w.vim_mode=='insert'
+    assert 'cancelled' in w.notice
+
+
+def test_f9_normal_typing_cancels_but_character_survives(tmp_path):
+    w=workspace(tmp_path)
+    w.set_document(m.DocumentModel('Hello'))
+    w.arm_path_paste()
+    w.handle_text('Z',paste=False)
+    assert w.doc.text=='ZHello'
+    assert not w.path_paste_armed
+    assert 'cancelled' in w.notice
+
+
+def test_overlay_text_field_disarms_f9_and_keeps_literal_paste(tmp_path):
+    a=tmp_path/'a.md'; b=tmp_path/'b.md'
+    a.write_text('A'); b.write_text('B')
+    w=workspace(tmp_path); start(w,a)
+    w.arm_path_paste()
+    w.request_text('Search','',lambda _:None)
+    assert not w.path_paste_armed
+    w.handle_text(str(b),paste=True)
+    assert len(w.documents)==1 and w.doc.path==a
+    assert w.overlays[-1].editor.text==str(b)
+
+
+def test_mouse_hover_cannot_override_keyboard_paste_context(tmp_path):
+    a=tmp_path/'a.md'; b=tmp_path/'b.md'
+    a.write_text('A'); b.write_text('B')
+    w=workspace(tmp_path); start(w,a)
+    w.frame(120,40)
+    rect=w.geometry.contents[m.Tile.VIEW]
+    assert w.layout.focus==m.Tile.EDIT
+    w.mouse('move',rect.x,rect.y)
+    w.handle_text(str(b),paste=True)
+    assert len(w.documents)==1 and w.doc.path==a
+    assert str(b) in w.doc.text
+
+
+def test_f9_capture_via_file_menu_executes_when_menu_closed(tmp_path):
+    w=workspace(tmp_path); w.open_menu('File')
+    overlay=w.overlays[-1]
+    overlay.index=next(i for i,item in enumerate(overlay.items) if item.command=='file.arm_drop')
+    w.overlay_accept()
+    assert not w.overlays and w.path_paste_armed
