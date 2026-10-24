@@ -2897,16 +2897,20 @@ HELP_TEXT = '''MDBM keyboard guide
 
 Ctrl+N  New buffer             Ctrl+O  Open file
 Ctrl+S  Save                   F4       Save as
-Ctrl+Q  Guarded quit           Ctrl+P  Command palette
-Ctrl+T  Restore all tiles      F10     Activate ribbon
+F9      Arm next path drop    Ctrl+Q   Guarded quit
+Ctrl+P  Command palette        Ctrl+T   Restore all tiles
+F10     Activate ribbon
 Tab / Shift+Tab               Next / previous visible tile
 Alt+1 / Alt+2 / Alt+3 / Alt+4  Filesystem / Contents / Edit / View
 Alt+F / E / T / N / H / S / ? Ribbon menus (also use F10)
 Alt+[ / Alt+]                 Narrow / widen left column
 Alt+- / Alt+=                 Shrink / grow View
 
-Outside text entry: terminal-dropped local paths may open files when
-bracketed paste is unambiguous. Paste into active Edit insertion remains text.
+Terminal drops arrive as paste, without a reliable target panel. Recognized
+paths pasted from Filesystem/Contents/View keep that keyboard focus, allowing
+repeated drops. Edit insertion pastes literally by default. F9 explicitly
+arms opening the NEXT bracketed-paste path(s), even while Edit is focused;
+Escape cancels, and invalid payloads never edit the document when armed.
 Terminal support varies: no portable native OS drag/drop event is available.
 
 Edit: arrows, Home/End, Ctrl+Home/End, Shift navigation,
@@ -3018,6 +3022,7 @@ class Workspace:
         self.app: Application | None=None; self.worker: PreviewWorker | None=None
         self.notice='Ready · Ctrl+P for commands'; self.notice_error=False
         self.clipboard=''; self.search_term=''; self.search_replacement=''; self.vim_mode='normal' if self.config.get('input','profile')=='vim' else 'insert'
+        self.path_paste_armed=False  # Single-use explicit override for Edit insertion.
         self.last_click: tuple[float,int,int,str,int]=(0,-1,-1,'',0)
         self.hover_due: tuple[str,int,float] | None=None; self.hover_close_due: tuple[str,float] | None=None
         self.ribbon_active=False; self.ribbon_index=0; self.ribbon_regions: list[tuple[str,Rect]]=[]
@@ -3468,7 +3473,7 @@ class Workspace:
         return state
 
     def open_path(self, path: str | Path, fragment: str = '',
-                  *, allow_directory: bool = True) -> None:
+                  *, allow_directory: bool = True, focus_edit: bool = True) -> None:
         target=self.files.resolve(path)
         if target.is_dir():
             if not allow_directory:
@@ -3476,14 +3481,16 @@ class Workspace:
             self.change_root(target); return
         existing=self._state_by_path(target)
         if existing is not None:
-            self.activate_document(existing.id); self.set_layout('focus',Tile.EDIT)
+            self.activate_document(existing.id)
+            if focus_edit: self.set_layout('focus',Tile.EDIT)
             if fragment:
                 if self.preview.generation!=self.doc.generation: self.parse_sync()
                 self.jump_anchor(fragment)
             self.status('Already open · '+str(target.relative_to(self.files.root)))
             return
         loaded=self.files.load(target)
-        self._append_document(DocumentModel.loaded(loaded)); self.set_layout('focus',Tile.EDIT)
+        self._append_document(DocumentModel.loaded(loaded))
+        if focus_edit: self.set_layout('focus',Tile.EDIT)
         if fragment:
             self.parse_sync(); self.jump_anchor(fragment)
         self.status('Opened '+str(target.relative_to(self.files.root)))
@@ -3728,6 +3735,7 @@ class Workspace:
         r=self.registry
         r.add('file.new','New document',lambda p:self.new_document(),['c-n'],'File')
         r.add('file.open','Open file…',lambda p:self.request_text('Open file','',self.open_path,'UTF-8 path relative to this workspace.'),['c-o'],'File')
+        r.add('file.arm_drop','Arm next file-path paste',lambda p:self.arm_path_paste(),['f9'],'File')
         r.add('file.save','Save',lambda p:self.save(),['c-s'],'File')
         r.add('file.save_as','Save As…',lambda p:self.save(True),['f4'],'File')
         # Compatibility alias retained for existing configs; MDBM-002 exposes
@@ -4041,6 +4049,9 @@ class Workspace:
     # Modal surfaces, ribbon, delayed nested menus and theme transactions
     # -------------------------------------------------------------------------
     def push_overlay(self, overlay: Overlay) -> None:
+        if self.path_paste_armed:
+            self.path_paste_armed=False
+            self.status('File-path capture cancelled · dialog opened')
         self.overlays.append(overlay); self.emit('menu-open'); self.invalidate()
 
     def close_overlay(self, cancel: bool = True) -> None:
@@ -4071,7 +4082,7 @@ class Workspace:
             suffix='  '+command.keys[0] if command.keys else ''
             return MenuItem(label or command.label+suffix,cid)
         if name=='File':
-            return [item(cid) for cid in ('file.new','file.open','file.save','file.save_as','document.close','file.mkdir','file.rename','file.trash','file.root','file.quit')]
+            return [item(cid) for cid in ('file.new','file.open','file.arm_drop','file.save','file.save_as','document.close','file.mkdir','file.rename','file.trash','file.root','file.quit')]
         if name=='Edit':
             return [item(cid) for cid in ('edit.undo','edit.redo','edit.copy','edit.cut','edit.paste','edit.select_all','edit.find','edit.replace','edit.insert_tab','edit.profile')]
         if name=='Tile':
@@ -4201,6 +4212,10 @@ class Workspace:
             overlay.editor.move_to(cell_to_offset(overlay.editor.text,column,self.config.ascii))
 
     def escape(self) -> None:
+        if self.path_paste_armed:
+            self.path_paste_armed=False
+            self.status('File-path capture cancelled')
+            return
         if self.capture:
             self.cancel_capture(); return
         if self.overlays:
@@ -4466,6 +4481,11 @@ class Workspace:
         self.invalidate()
 
     def handle_key(self, key: str, command: str) -> None:
+        if self.path_paste_armed and command!='file.arm_drop':
+            if command=='input.escape':
+                self.escape(); return
+            self.path_paste_armed=False
+            self.status('File-path capture cancelled')
         if command in ('file.quit','tile.restore','command.palette'):
             self.dispatch(command); return
         if self.capture and command!='input.escape': self.cancel_capture()
@@ -4524,6 +4544,14 @@ class Workspace:
             elif key=='c-y': doc.redo()
             if overlay.kind=='palette': overlay.index=0; self.palette_items(overlay)
 
+    def arm_path_paste(self) -> None:
+        """Opt in once; ordinary Edit paste never opens files implicitly."""
+        if self.overlays:
+            self.status('Close the dialog before arming a file drop',True)
+            return
+        self.path_paste_armed=True
+        self.status('File-drop capture armed · drop/paste paths · Esc cancels')
+
     def paste_path_ingress_enabled(self) -> bool:
         """Only non-text-entry workspace contexts may interpret terminal paste."""
         if self.overlays: return False
@@ -4545,7 +4573,9 @@ class Workspace:
                 if not target.is_file():
                     raise PathError('Only existing regular files may be dropped.')
                 duplicate=self._state_by_path(target) is not None
-                self.open_path(target,allow_directory=False)
+                # Keep the original keyboard context: otherwise the first
+                # drop focuses Edit and the next identical drop inserts text.
+                self.open_path(target,allow_directory=False,focus_edit=False)
                 if duplicate: existing+=1
                 else: opened+=1
             except (MDBMError,OSError,ValueError) as exc:
@@ -4578,6 +4608,15 @@ class Workspace:
                 choices=[i for i,(label,_) in enumerate(overlay.actions) if label.casefold().startswith(text.casefold())]
                 if len(choices)==1: self.overlay_action({'row':choices[0]})
             self.invalidate(); return
+        if paste and self.path_paste_armed:
+            self.path_paste_armed=False
+            if not self.open_pasted_paths(text):
+                self.status('No unambiguous local file paths · document unchanged',True)
+            return
+        if self.path_paste_armed:
+            # Typing disarms without discarding normal editor/Vim input.
+            self.path_paste_armed=False
+            self.status('File-path capture cancelled')
         if paste and self.paste_path_ingress_enabled() and self.open_pasted_paths(text):
             return
         if self.layout.focus!=Tile.EDIT:

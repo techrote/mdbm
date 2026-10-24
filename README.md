@@ -78,12 +78,26 @@ syntax are refused. Valid paths in a multi-file drop remain open even when
 another member is rejected. MDBM never invokes a shell or expands commands,
 globs, environment variables, or tilde for terminal paste.
 
-**Edit insertion mode and all text-entry dialogs always receive pasted paths
-as literal text**, never file-open requests. After opening a file, MDBM focuses
-Edit, so focus a non-edit tile again before using another drop in the standard
-keyboard profile. Actual terminal-emulator behavior varies; use Ctrl+O when
-your terminal does not paste dropped file paths.
- A documented Vim subset supplies Normal/Insert/Visual modes; it is not a full Vim emulator. The detailed keyboard/mouse and mode contracts are in `docs/MDBM_PRODUCT_SPEC.md` and F1.
+**Edit insertion mode and all text-entry dialogs receive pasted paths as
+literal text by default.** Drops from a non-edit workspace context preserve
+that tile's keyboard focus, so repeated drops consistently open documents
+without redirecting the next paste into Edit. Focus **Filesystem** (Alt+1),
+**Contents** (Alt+2) or **View** (Alt+4); the mouse pointer's drop location
+does not reliably determine which tile receives terminal input.
+
+To intentionally open a dropped file while **Edit** is focused, press **F9**
+(or choose **File → Arm next file-path paste**) immediately beforehand.
+The next bracketed-paste payload is handled as a single file-open attempt
+rather than inserted into the document. An unrecognized payload changes
+neither document nor files. Escape, ordinary typing or opening a dialog
+cancels this one-shot override. Normal Edit paste remains unchanged after
+the attempt.
+
+Actual terminal-emulator behaviour varies; use Ctrl+O if your terminal does
+not deliver dropped paths as bracketed paste. A documented Vim subset
+supplies Normal/Insert/Visual modes; it is not a complete Vim emulator.
+The detailed keyboard/mouse and mode contracts are in
+`docs/MDBM_PRODUCT_SPEC.md` and F1.
 
 ## Reading and editing
 
