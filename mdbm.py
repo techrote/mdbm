@@ -2897,7 +2897,7 @@ HELP_TEXT = '''MDBM keyboard guide
 
 Ctrl+N  New buffer             Ctrl+O  Open file
 Ctrl+S  Save                   F4       Save as
-Ctrl+Q  Guarded quit           Ctrl+P  Command palette
+F9      Arm next path drop    Ctrl+Q   Guarded quit           Ctrl+P  Command palette
 Ctrl+T  Restore all tiles      F10     Activate ribbon
 Tab / Shift+Tab               Next / previous visible tile
 Alt+1 / Alt+2 / Alt+3 / Alt+4  Filesystem / Contents / Edit / View
@@ -2905,8 +2905,11 @@ Alt+F / E / T / N / H / S / ? Ribbon menus (also use F10)
 Alt+[ / Alt+]                 Narrow / widen left column
 Alt+- / Alt+=                 Shrink / grow View
 
-Outside text entry: terminal-dropped local paths may open files when
-bracketed paste is unambiguous. Paste into active Edit insertion remains text.
+Terminal drops arrive as paste, without a reliable target panel. Recognized
+paths pasted from Filesystem/Contents/View keep that keyboard focus, allowing
+repeated drops. Edit insertion pastes literally by default. F9 explicitly
+arms opening the NEXT bracketed-paste path(s), even while Edit is focused;
+Escape cancels, and invalid payloads never edit the document when armed.
 Terminal support varies: no portable native OS drag/drop event is available.
 
 Edit: arrows, Home/End, Ctrl+Home/End, Shift navigation,
