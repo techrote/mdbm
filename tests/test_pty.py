@@ -84,6 +84,8 @@ def test_pty_bracketed_path_paste_opens_document(tmp_path):
         child.send('\x1b1'); time.sleep(.12)
         child.send('\x1b[200~'+str(dropped)+'\x1b[201~')
         child.expect('drop target')
+        # Ingress now preserves Filesystem focus; explicitly focus Edit to type.
+        child.send('\x1b3'); time.sleep(.1)
         child.send('X'); time.sleep(.08); child.sendcontrol('s')
         child.expect('Saved'); finish(child)
         assert dropped.read_text()=='Xdrop target\n'
@@ -101,5 +103,47 @@ def test_pty_bracketed_path_paste_in_edit_remains_text(tmp_path):
         finish(child)
         assert target.read_text()==str(dropped)+'alpha beta\n'
         assert dropped.read_text()=='unchanged\n'
+    finally:
+        if child.isalive(): child.close(force=True)
+
+
+
+def test_pty_consecutive_file_drops_without_refocusing(tmp_path):
+    child,original,log=launch(tmp_path)
+    first=tmp_path/'first.md'; second=tmp_path/'second.md'
+    first.write_text('FIRST_DROP_MARKER\n')
+    second.write_text('SECOND_DROP_MARKER\n')
+    try:
+        child.send('\x1b1'); time.sleep(.12)  # Focus Filesystem once.
+        child.send('\x1b[200~'+str(first)+'\x1b[201~')
+        child.expect('FIRST_DROP_MARKER')
+        child.send('\x1b[200~'+str(second)+'\x1b[201~')
+        child.expect('SECOND_DROP_MARKER')
+        child.send('\x1b3'); time.sleep(.10)  # Edit only after both opens.
+        child.send('Z'); time.sleep(.08); child.sendcontrol('s')
+        child.expect('Saved'); finish(child)
+        assert original.read_text()=='alpha beta\n'
+        assert first.read_text()=='FIRST_DROP_MARKER\n'
+        assert second.read_text()=='ZSECOND_DROP_MARKER\n'
+    finally:
+        if child.isalive(): child.close(force=True)
+
+
+def test_pty_f9_explicit_edit_drop_once(tmp_path):
+    child,original,log=launch(tmp_path)
+    dropped=tmp_path/'opened.md'; dropped.write_text('F9_OPENED_MARKER\n')
+    other=tmp_path/'not-opened.md'; other.write_text('NO_OPEN_MARKER\n')
+    try:
+        child.send('\x1b[20~')  # xterm/VT F9.
+        child.expect('File-drop capture armed')
+        child.send('\x1b[200~'+str(dropped)+'\x1b[201~')
+        child.expect('F9_OPENED_MARKER')
+        # One-shot reset: ordinary subsequent Edit paste is still text.
+        child.send('\x1b[200~'+str(other)+'\x1b[201~')
+        time.sleep(.08); child.sendcontrol('s'); child.expect('Saved')
+        finish(child)
+        assert dropped.read_text()==str(other)+'F9_OPENED_MARKER\n'
+        assert other.read_text()=='NO_OPEN_MARKER\n'
+        assert original.read_text()=='alpha beta\n'
     finally:
         if child.isalive(): child.close(force=True)
