@@ -4484,6 +4484,7 @@ class Workspace:
             if command=='input.escape':
                 self.escape(); return
             self.path_paste_armed=False
+            self.status('File-path capture cancelled')
         if command in ('file.quit','tile.restore','command.palette'):
             self.dispatch(command); return
         if self.capture and command!='input.escape': self.cancel_capture()
@@ -4614,6 +4615,7 @@ class Workspace:
         if self.path_paste_armed:
             # Typing disarms without discarding normal editor/Vim input.
             self.path_paste_armed=False
+            self.status('File-path capture cancelled')
         if paste and self.paste_path_ingress_enabled() and self.open_pasted_paths(text):
             return
         if self.layout.focus!=Tile.EDIT:
