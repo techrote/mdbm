@@ -2897,8 +2897,9 @@ HELP_TEXT = '''MDBM keyboard guide
 
 Ctrl+N  New buffer             Ctrl+O  Open file
 Ctrl+S  Save                   F4       Save as
-F9      Arm next path drop    Ctrl+Q   Guarded quit           Ctrl+P  Command palette
-Ctrl+T  Restore all tiles      F10     Activate ribbon
+F9      Arm next path drop    Ctrl+Q   Guarded quit
+Ctrl+P  Command palette        Ctrl+T   Restore all tiles
+F10     Activate ribbon
 Tab / Shift+Tab               Next / previous visible tile
 Alt+1 / Alt+2 / Alt+3 / Alt+4  Filesystem / Contents / Edit / View
 Alt+F / E / T / N / H / S / ? Ribbon menus (also use F10)
