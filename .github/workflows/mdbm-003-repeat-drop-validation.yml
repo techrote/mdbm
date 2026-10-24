@@ -1,0 +1,32 @@
+name: MDBM-003 follow-up validation (temporary)
+on:
+  push:
+    branches: [fix/mdbm-003-repeat-drop-context]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install release and test dependencies
+        run: python -m pip install -e ".[test]"
+      - name: Compile runtime
+        run: python -m py_compile mdbm.py
+      - name: Full Linux suite
+        if: runner.os == 'Linux'
+        run: python -m pytest -q
+      - name: Windows full suite excluding unrelated baseline SIGINT test
+        if: runner.os == 'Windows'
+        run: python -m pytest -q -k "not test_script_output_sanitized_and_bounded"
