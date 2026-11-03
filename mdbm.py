@@ -2581,8 +2581,14 @@ class StateStore:
         owner=record.get('owner',{})
         return not self.snapshot_live(record) or (isinstance(owner,dict) and owner.get('token')==self.token)
 
-    def recovery_inventory(self, offset: int = 0, limit: int = RECOVERY_PAGE_SIZE) -> dict[str,Any]:
-        """Stat every archive before newest-first paging; never read text here."""
+    def recovery_inventory(self, offset: int = 0, limit: int = RECOVERY_PAGE_SIZE,
+                           *, before: tuple[int,str] | None = None) -> dict[str,Any]:
+        """Stat every archive before paging; use a stable keyset for startup scans.
+
+        Interactive inventory retains positional paging. A startup discovery
+        cursor avoids skipping a saved archive when another instance removes
+        a newer entry between page reads.
+        """
         offset=max(0,offset); limit=max(1,min(100,limit)); newest=[]; total_bytes=0; total=0
         if not self.enabled: return {'entries':[],'total':0,'bytes':0,'offset':offset,'limit':limit}
         for path in self._snapshot_paths():
@@ -2595,6 +2601,7 @@ class StateStore:
                     total_bytes+=st.st_size
                 total+=1
                 entry=(item['mtime_ns'],item['name'],item)
+                if before is not None and entry[:2]>=before: continue
                 if len(newest)<offset+limit: heapq.heappush(newest,entry)
                 elif entry[:2]>newest[0][:2]: heapq.heapreplace(newest,entry)
             except OSError: continue
@@ -4045,9 +4052,9 @@ class Workspace:
 
     def _offer_recovery(self, active: Path | None) -> None:
         assert self.store is not None
-        offset=0
+        before: tuple[int,str] | None = None
         while True:
-            page=self.store.recovery_inventory(offset)
+            page=self.store.recovery_inventory(before=before)
             for item in page['entries']:
                 try: record=self.store.recovery_metadata(item['name'],self.files.max_bytes)
                 except (MDBMError,OSError,UnicodeError,ValueError) as exc:
@@ -4056,8 +4063,12 @@ class Workspace:
                 docs=self._recovery_records(record)
                 if not docs or (active is not None and not any(doc.get('path')==str(active) for doc in docs)): continue
                 self._present_recovery(item['name'],record,active); return
-            offset+=page['limit']
-            if offset>=page['total']: return
+            if not page['entries']: return
+            # Move beneath the last observed (mtime, name) pair instead of
+            # advancing a live offset: concurrent cleanup of a newer archive
+            # must not hide the next saved candidate.
+            last=page['entries'][-1]
+            before=(last['mtime_ns'],last['name'])
 
     def _present_recovery(self, name: str, record: Mapping[str,Any], active: Path | None = None,
                           inventory: bool = False) -> None:
