@@ -81,6 +81,12 @@ publication guard. A directory, FIFO, device or symlink that merely has a
 `content-<sha256>.bin`-shaped name is not treated as a deletable blob: it is
 preserved rather than aborting unrelated snapshot publication. A referenced
 non-regular blob remains unreadable and fails closed on restore/publication.
+An unreferenced regular blob that cannot be *unlinked* (for example because
+Windows still has an open file handle) is left in place and continues to
+count toward the storage quota. A deduplicated diagnostic records deferred
+cleanup, but publication may still proceed if the charged bytes fit.
+In contrast, an orphan that cannot even be *statted* aborts publication
+rather than silently undercounting its unknown size.
 If any archive cannot be inspected, automatic collection stops conservatively
 because that archive might still reference useful content. Discarding the
 unreadable archive explicitly makes later collection possible. The inventory

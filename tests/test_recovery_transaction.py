@@ -499,3 +499,51 @@ def test_nonregular_orphan_content_name_does_not_block_publication(store,tmp_pat
     # Repeated explicit collection must also preserve the foreign path.
     assert store.collect_recovery_garbage()==0
     assert obstacle.lstat()
+
+
+def test_undeletable_orphan_is_charged_but_does_not_block_recovery(store,tmp_path,monkeypatch):
+    """A sharing violation on optional GC cannot suppress a durable snapshot."""
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['first dirty buffer']))
+    orphan=store.directory/('content-'+('e'*64)+'.bin')
+    orphan.write_bytes(b'undeletable orphan content')
+    original_unlink=type(orphan).unlink
+
+    def denied_unlink(path,*args,**kwargs):
+        if path==orphan: raise PermissionError('simulated sharing violation')
+        return original_unlink(path,*args,**kwargs)
+
+    monkeypatch.setattr(type(orphan),'unlink',denied_unlink)
+    store.write(name,bundle(tmp_path,['second dirty buffer']))
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='second dirty buffer'
+    assert orphan.read_bytes()==b'undeletable orphan content'
+    assert sum('orphan cleanup deferred' in message for message in store.diagnostics)==1
+    assert store.collect_recovery_garbage()==0
+    assert sum('orphan cleanup deferred' in message for message in store.diagnostics)==1
+    before=(store.directory/name).read_bytes()
+    # The orphan is still included in the accounting even though unlink failed.
+    store.storage_limit=store.recovery_inventory()['bytes']+1
+    with pytest.raises(m.MDBMError,match='storage limit reached'):
+        store.write(name,bundle(tmp_path,['new dirty buffer'+'x'*500]))
+    assert (store.directory/name).read_bytes()==before
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='second dirty buffer'
+
+
+def test_unstatable_orphan_still_fails_closed_before_publication(store,tmp_path,monkeypatch):
+    """Do not undercount inaccessible files while enforcing the hard quota."""
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['retain unsaved text']))
+    previous=(store.directory/name).read_bytes()
+    orphan=store.directory/('content-'+('e'*64)+'.bin')
+    orphan.write_bytes(b'contents cannot be accounted')
+    original_lstat=type(orphan).lstat
+
+    def denied_lstat(path,*args,**kwargs):
+        if path==orphan: raise PermissionError('simulated inaccessible metadata')
+        return original_lstat(path,*args,**kwargs)
+
+    monkeypatch.setattr(type(orphan),'lstat',denied_lstat)
+    with pytest.raises(PermissionError,match='inaccessible metadata'):
+        store.write(name,bundle(tmp_path,['attempted overwrite']))
+    assert (store.directory/name).read_bytes()==previous
+    assert orphan.is_file()

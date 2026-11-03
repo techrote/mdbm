@@ -2704,11 +2704,23 @@ class StateStore:
             # regular, unreferenced content is ours to collect.
             try:
                 st=path.lstat()
-                if not stat.S_ISREG(st.st_mode): continue
+            except FileNotFoundError:
+                continue
+            # An unstatable entry cannot be safely accounted against the
+            # storage quota; keep the existing fail-closed error in that case.
+            if not stat.S_ISREG(st.st_mode): continue
+            try:
                 path.unlink(); removed+=st.st_size
             except FileNotFoundError:
                 # A non-cooperating process may have removed it already.
                 continue
+            except OSError:
+                # Windows sharing violations and permission errors can make
+                # an *unreferenced* file temporarily undeletable. Its bytes
+                # remain charged by recovery_inventory; do not block an
+                # otherwise durable snapshot unless the quota is exceeded.
+                notice='Recovery orphan cleanup deferred; retained content still counts toward the storage limit.'
+                if notice not in self.diagnostics: self.diagnostics.append(notice)
         return removed
 
     def collect_recovery_garbage(self) -> int:
