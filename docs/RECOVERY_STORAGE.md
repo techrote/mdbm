@@ -104,3 +104,11 @@ instances. This prevents collection from deleting a blob between another
 instance's content write and manifest publication. The UI queues these disk
 operations with its persistence worker; only completion handlers mutate live
 workspace state.
+
+A live owner's archive is never replaceable by another instance through the
+storage publication API. A secondary instance may update only its own
+lease-token recovery slot; any existing unreadable archive is preserved for
+explicit inspection rather than silently overwritten. Partial archive
+replacement holds the publication guard from ownership verification through
+manifest publication and orphan collection. See
+[Recovery transaction continuation](RECOVERY_TRANSACTION_CONTINUATION_2026-11-03.md).

@@ -2632,8 +2632,8 @@ class StateStore:
         with StateFileLock(self.directory/'recovery.guard',True):
             removed=self._collect_orphan_blobs(); SafeFiles._sync_dir(self.directory); return removed
 
-    def write_recovery(self, name: str, value: Mapping[str,Any]) -> None:
-        if not _RECOVERY_NAME.fullmatch(name): raise MDBMError('Invalid recovery snapshot name.')
+    def _prepare_recovery(self, value: Mapping[str,Any]) -> tuple[list[dict[str,Any]],dict[str,str],bytes]:
+        """Validate and encode a candidate without touching durable snapshots."""
         schema=value.get('schema'); sources=([value] if schema=='mdbm-recovery/1.0' else value.get('documents'))
         if not isinstance(sources,list) or not sources or len(sources)>MAX_OPEN_DOCUMENTS:
             raise MDBMError('Recovery document set exceeds its limit.')
@@ -2670,25 +2670,50 @@ class StateStore:
         encoded=json.dumps(manifest,ensure_ascii=True,separators=(',',':')).encode('utf-8')
         if len(encoded)>RECOVERY_MANIFEST_BYTES:
             raise MDBMError('Recovery metadata exceeds its size limit; previous snapshot retained.')
+        return docs,texts,encoded
+
+    def _assert_recovery_writable_locked(self, name: str) -> None:
+        """Prevent a secondary or another live owner replacing a recovery slot."""
+        if not self.owns_lock and name!=self.recovery_name:
+            raise MDBMError('Snapshot retained: another instance owns it.')
+        path=self._path(name)
+        if not path.exists(): return
+        try: previous=self._read_recovery(name,self.max_recovery_bytes,True)
+        except (OSError,UnicodeError,MDBMError,ValueError):
+            raise MDBMError('Existing recovery archive is unreadable; snapshot retained.') from None
+        if self.snapshot_live(previous):
+            owner=previous.get('owner')
+            if not isinstance(owner,dict) or owner.get('token')!=self.token:
+                raise MDBMError('Snapshot retained: another instance owns it.')
+
+    def _publish_recovery_locked(self, name: str, docs: list[dict[str,Any]],
+                                 texts: dict[str,str], encoded: bytes) -> None:
+        """Publish only under recovery.guard, including the quota and GC checks."""
+        self._assert_recovery_writable_locked(name)
+        self._collect_orphan_blobs()
+        usage=self.recovery_inventory()['bytes']
+        old_size=self._path(name).stat().st_size if self._path(name).exists() else 0
+        missing={}; replaced_bytes=0
+        for digest,size in {item['content']:item['bytes'] for item in docs}.items():
+            blob=self._blob_path(digest)
+            if blob.exists():
+                previous_size=blob.stat().st_size
+                with blob.open('rb') as stream: previous=stream.read(size+1)
+                if len(previous)==size and hashlib.sha256(previous).hexdigest()==digest: continue
+                replaced_bytes+=previous_size
+            missing[digest]=size
+        if any(digest not in texts for digest in missing): raise MDBMError('Recovery content is missing.')
+        if usage-old_size-replaced_bytes+len(encoded)+sum(missing.values())>self.recovery_storage_limit:
+            raise MDBMError('Recovery storage limit reached; previous snapshot retained. Open File → Recovery inventory to discard unneeded archives.')
+        for digest in missing: self._write_bytes(self._blob_path(digest).name,texts[digest].encode('utf-8'))
+        self._write_bytes(name,encoded)
+        self._collect_orphan_blobs()
+
+    def write_recovery(self, name: str, value: Mapping[str,Any]) -> None:
+        if not _RECOVERY_NAME.fullmatch(name): raise MDBMError('Invalid recovery snapshot name.')
+        docs,texts,encoded=self._prepare_recovery(value)
         with StateFileLock(self.directory/'recovery.guard',True):
-            self._collect_orphan_blobs()
-            usage=self.recovery_inventory()['bytes']
-            old_size=self._path(name).stat().st_size if self._path(name).exists() else 0
-            missing={}; replaced_bytes=0
-            for digest,size in {item['content']:item['bytes'] for item in docs}.items():
-                blob=self._blob_path(digest)
-                if blob.exists():
-                    previous_size=blob.stat().st_size
-                    with blob.open('rb') as stream: previous=stream.read(size+1)
-                    if len(previous)==size and hashlib.sha256(previous).hexdigest()==digest: continue
-                    replaced_bytes+=previous_size
-                missing[digest]=size
-            if any(digest not in texts for digest in missing): raise MDBMError('Recovery content is missing.')
-            if usage-old_size-replaced_bytes+len(encoded)+sum(missing.values())>self.recovery_storage_limit:
-                raise MDBMError('Recovery storage limit reached; previous snapshot retained. Open File → Recovery inventory to discard unneeded archives.')
-            for digest in missing: self._write_bytes(self._blob_path(digest).name,texts[digest].encode('utf-8'))
-            self._write_bytes(name,encoded)
-            self._collect_orphan_blobs()
+            self._publish_recovery_locked(name,docs,texts,encoded)
 
     def recovery(self, doc: DocumentModel, root: Path) -> None:
         if not doc.dirty: return
@@ -2713,7 +2738,12 @@ class StateStore:
             if not self.can_modify_recovery(name,record): raise MDBMError('Snapshot retained: another instance owns it.')
             if remaining is None:
                 self._path(name).unlink(missing_ok=True); self._collect_orphan_blobs(); SafeFiles._sync_dir(self.directory)
-        if remaining is not None: self.write(name,remaining)
+            else:
+                # The same guard must cover ownership validation and the
+                # partial replacement; another process cannot claim this slot
+                # or change the archive between those two operations.
+                docs,texts,encoded=self._prepare_recovery(remaining)
+                self._publish_recovery_locked(name,docs,texts,encoded)
 
     def clear_recovery(self) -> None:
         if not self.enabled: return
