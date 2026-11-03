@@ -13,6 +13,10 @@ and immutable content references. UTF-8 text is stored in
 The digest and exact byte length are checked on every read. A fresh write can
 repair a corrupt content file when the current buffer provides the matching
 original text.
+During v3 publication, documents sharing a content digest must declare exactly
+the same byte length. Conflicting sizes are rejected before any publication or
+partial-discard replacement; this prevents an inconsistent manifest from
+replacing a restorable snapshot. Correctly shared content remains deduplicated.
 
 The writer and reader enforce the same limits: at most 32 documents, each
 within the configured `application.max_file_mib` UTF-8 byte budget, and a
