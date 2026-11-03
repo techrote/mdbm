@@ -49,6 +49,15 @@ workspace and live/saved state. Enter and clicking a row use the same inspect
 command. Previous/next page controls remain reachable through the same command
 system.
 
+Startup's deferred-recovery scan uses a newest-first keyset cursor consisting
+of the archive's modification time and filename, rather than repeatedly
+advancing an offset into a changing directory. Removal of a newer archive by
+another instance between page reads therefore cannot skip an older candidate.
+An archive created later *above* the cursor is visible on the next startup
+or through the interactive inventory. The interactive Previous/Next controls
+remain positional; if concurrent writers change the directory, their pages
+may shift, but no archive is automatically deleted as a consequence.
+
 Inspection offers Restore, explicit Discard and Back. A snapshot from another
 workspace explains that its root must be opened to restore it. Unreadable
 archives are visible and can be explicitly discarded by the primary instance;
