@@ -112,3 +112,11 @@ explicit inspection rather than silently overwritten. Partial archive
 replacement holds the publication guard from ownership verification through
 manifest publication and orphan collection. See
 [Recovery transaction continuation](RECOVERY_TRANSACTION_CONTINUATION_2026-11-03.md).
+
+The generic `StateStore.write` entry point also enforces this boundary. Names
+matching `recovery.json` or `recovery-<token>.json` are accepted only with
+supported recovery envelopes; invalid, non-object and future-version payloads
+raise an explicit error without creating or replacing a file. They can never
+fall through to ordinary JSON publication and bypass `recovery.guard` or the
+live-owner check. Ordinary state names (such as `session.json`) retain the
+existing JSON writer.

@@ -87,3 +87,44 @@ def test_failed_partial_publication_preserves_manifest_and_source(store,tmp_path
         store.discard_recovery(name,dict(record,documents=record['documents'][:1]))
     assert (store.directory/name).read_bytes()==previous
     assert [d['text'] for d in store.read_recovery(name,4096)['documents']]==['retained','to drop']
+
+
+@pytest.mark.parametrize('invalid',[
+    None,
+    [],
+    {'schema':'mdbm-recovery/4.0','documents':[]},
+    {'schema':'mdbm-session/2.0','documents':[]},
+    {'documents':[]},
+])
+def test_unsupported_recovery_write_cannot_replace_existing_snapshot(store,tmp_path,invalid):
+    # The generic state writer previously bypassed recovery.guard and owner
+    # validation for any unrecognized schema (including non-mapping input).
+    store.write(store.recovery_name,bundle(tmp_path,['keep unsaved']))
+    original=(store.directory/store.recovery_name).read_bytes()
+    with pytest.raises(m.MDBMError,match='Unsupported recovery format'):
+        store.write(store.recovery_name,invalid)
+    assert (store.directory/store.recovery_name).read_bytes()==original
+    assert store.read_recovery(store.recovery_name,4096)['documents'][0]['text']=='keep unsaved'
+
+
+def test_unsupported_generic_write_cannot_clobber_another_live_owner(store,tmp_path):
+    store.write(store.recovery_name,bundle(tmp_path,['primary unsaved']))
+    original=(store.directory/store.recovery_name).read_bytes()
+    secondary=m.StateStore(store.directory)
+    assert secondary.enabled and not secondary.owns_lock
+    try:
+        with pytest.raises(m.MDBMError,match='Unsupported recovery format'):
+            secondary.write(store.recovery_name,{'schema':'unrecognized','documents':[]})
+        assert (store.directory/store.recovery_name).read_bytes()==original
+        assert store.read_recovery(store.recovery_name,4096)['documents'][0]['text']=='primary unsaved'
+    finally:
+        secondary.close()
+
+
+def test_invalid_recovery_write_creates_no_slot_and_regular_state_still_writes(store):
+    name='recovery-'+('d'*32)+'.json'
+    with pytest.raises(m.MDBMError,match='Unsupported recovery format'):
+        store.write(name,{'schema':'unknown'})
+    assert not (store.directory/name).exists()
+    store.write('session.json',{'schema':'mdbm-session/2.0','documents':[]})
+    assert store.read('session.json')['schema']=='mdbm-session/2.0'

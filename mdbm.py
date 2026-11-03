@@ -2492,9 +2492,16 @@ class StateStore:
 
     def write(self, name: str, value: Any) -> None:
         if not self.enabled: return
-        if _RECOVERY_NAME.fullmatch(name) and isinstance(value,dict) and value.get('schema') in (
-                'mdbm-recovery/1.0','mdbm-recovery/2.0','mdbm-recovery/3.0'):
-            self.write_recovery(name,value); return
+        if _RECOVERY_NAME.fullmatch(name):
+            # Recovery files must never fall through to unguarded JSON
+            # publication, even for invalid or future-version payloads.
+            # Otherwise a secondary could overwrite a live primary snapshot
+            # simply by supplying an unrecognized schema.
+            if not isinstance(value,dict) or value.get('schema') not in (
+                    'mdbm-recovery/1.0','mdbm-recovery/2.0','mdbm-recovery/3.0'):
+                raise MDBMError('Unsupported recovery format; snapshot retained.')
+            self.write_recovery(name,value)
+            return
         self._write_json(name,value)
 
     def _snapshot_paths(self) -> Iterator[Path]:

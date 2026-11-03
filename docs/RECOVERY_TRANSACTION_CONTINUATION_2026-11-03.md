@@ -35,3 +35,15 @@ tests/test_recovery_background_lifecycle.py tests/test_state_lock_processes.py`
 plus full Linux/Windows matrix and installed-wheel smoke for the precise
 commit. This stacked PR does **not** alter the qualified PR #8 head and
 must not merge before its base and exact-head checks are accepted.
+
+## Generic publication dispatch follow-up
+
+Source review identified a second ownership bypass: previously the generic
+`StateStore.write` delegated to `write_recovery` *only* for recognized
+recovery schemas; malformed payloads and unknown schemas fell through to
+`_write_json`, which uses neither the publication guard nor the live-owner
+check. An invalid payload from a secondary could therefore overwrite the
+primary's protected archive outright. All recovery filenames now enter the
+guarded recovery-validation path or fail closed before any write. Regression
+cases cover malformed and unknown schemas, non-object payloads, primary-owned
+and another instance's live archive, and ordinary session JSON unaffected.
