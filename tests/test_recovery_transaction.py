@@ -467,3 +467,35 @@ def test_special_file_guards_use_nonblocking_open_and_fail_closed(tmp_path,monke
     assert len(opened)==1
     assert opened[0] & os.O_NONBLOCK
     assert stat.S_ISFIFO(path.lstat().st_mode)
+
+
+@pytest.mark.parametrize('kind',['directory','fifo'])
+def test_nonregular_orphan_content_name_does_not_block_publication(store,tmp_path,kind):
+    """A content-shaped special file is neither GC-owned nor a reason to lose saves."""
+    if kind=='fifo' and not hasattr(os,'mkfifo'):
+        pytest.skip('POSIX FIFO support required')
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['first unsaved version']))
+    old_manifest=(store.directory/name).read_bytes()
+    obstacle=store.directory/('content-'+('e'*64)+'.bin')
+    if kind=='directory':
+        obstacle.mkdir()
+        (obstacle/'sentinel').write_bytes(b'keep non-blob directory intact')
+    else:
+        os.mkfifo(obstacle)
+    orphan=store.directory/('content-'+('f'*64)+'.bin')
+    orphan.write_bytes(b'unreferenced regular content')
+    # Collection runs on both sides of manifest publication. A non-regular
+    # lookalike must not interrupt either pass, and a genuine orphan is free.
+    store.write(name,bundle(tmp_path,['second unsaved version']))
+    assert (store.directory/name).read_bytes()!=old_manifest
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='second unsaved version'
+    assert not orphan.exists()
+    assert obstacle.lstat()
+    if kind=='directory':
+        assert (obstacle/'sentinel').read_bytes()==b'keep non-blob directory intact'
+    else:
+        assert stat.S_ISFIFO(obstacle.lstat().st_mode)
+    # Repeated explicit collection must also preserve the foreign path.
+    assert store.collect_recovery_garbage()==0
+    assert obstacle.lstat()
