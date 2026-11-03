@@ -94,3 +94,22 @@ writes now fail before any filesystem mutation. Valid content creation and
 repair remain private to the guarded recovery publisher. A shared-blob
 regression exercises both primary and secondary write attempts and verifies
 that both archives remain hydratable.
+
+## Invalid PID versus exited owner: CI qualification correction
+
+The first reservation regression passed, but the stale-lease test used PID
+`-1` as an example of a dead owner. That is **not** a valid PID; the existing
+non-signalling liveness helper intentionally treats invalid, inaccessible and
+otherwise unverifiable owner identities as potentially live. The new
+reservation check correctly rejected the write, and the previous exact-head
+matrix failed one test on each of Ubuntu 3.11, Ubuntu 3.13 and Windows 3.13.
+Because that failure occurred in the regression phase, wheel checks were
+skipped on that head ([run 41630020273](https://github.com/techrote/mdbm/actions/runs/41630020273)).
+
+The repaired test creates and reaps a real short-lived subprocess and uses
+that positive, native evidence of termination when exercising stale-lease
+reuse. A parameterized companion verifies that malformed/unknown PID values
+(including `-1`) continue to reserve their slots. Neither production
+liveness logic nor ownership-failure behavior was relaxed. Future assertions
+must distinguish a demonstrably exited PID from an unknown one. Exact-head
+Linux/Windows tests and installed-wheel checks must pass before merging.
