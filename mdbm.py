@@ -2470,7 +2470,10 @@ class StateStore:
         if not self.enabled: return None
         try:
             p=self._path(name)
-            with p.open('rb') as f: raw=f.read(max_bytes+1)
+            # Lease/owner JSON can be inspected while recovery.guard is held.
+            # Non-regular replacement paths (especially POSIX FIFOs) must
+            # never block that shared transaction; validate the descriptor.
+            with self._open_recovery_regular(p) as f: raw=f.read(max_bytes+1)
             if len(raw)>max_bytes: raise MDBMError('State file exceeds its size limit')
             return json.loads(raw)
         except FileNotFoundError: return None
