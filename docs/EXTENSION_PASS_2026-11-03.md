@@ -182,10 +182,11 @@ those source identities separate.
 | Visual inspection | Quiet Study, workspace chooser, appearance panel, compact mode and recovery inventory generated from the compositor |
 | Final published source | Exact Git tree and full Ubuntu 3.11/3.13 + Windows 3.13 CI evidence recorded on [PR #8](https://github.com/techrote/mdbm/pull/8) |
 
-The declared release parser/plugins were installed. The Windows suite is not
-filtered to hide state/process tests; only the POSIX PTY module is
-platform-skipped. CI builds the final published wheel and repeats installed
-target/prefix/theme/entry-point checks.
+The declared release parser/plugins were installed. The Windows suite runs the
+state/process tests, including simultaneous ownership contenders and crash
+reclamation. Its 11 platform skips are the ten POSIX PTY cases and one
+symlink-creation case that requires native Windows privileges. CI builds the
+published wheel and repeats installed target/prefix/theme/entry-point checks.
 
 ### Large-document measurement
 

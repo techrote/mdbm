@@ -52,7 +52,53 @@
     "pytest": "9.2.0",
     "pyte": "0.8.2"
   },
-  "remote_verification": "The pull request records the exact published tree and final Linux/Windows CI run.",
+  "remote_verification": {
+    "run_id": 41561808862,
+    "url": "https://github.com/techrote/mdbm/actions/runs/41561808862",
+    "head": "d2e5f2abe9f354aab8c072632a1e91e1d3c6a577",
+    "tested_merge": "b102aae90b7635ccb1ad2b892dd63640147602f8",
+    "tree": "13bfbfb7ce6d67de509288c26127a8e3e846d70d",
+    "runtime_source_sha256": "fc16e5b2638cbaee25afc40524dd22c4697ecf9de843972ef0550b6e5c496b2a",
+    "conclusion": "success",
+    "matrix": [
+      {
+        "os": "Ubuntu",
+        "python": "3.11",
+        "passed": 883,
+        "skipped": 0,
+        "seconds": 220.96
+      },
+      {
+        "os": "Ubuntu",
+        "python": "3.13",
+        "passed": 883,
+        "skipped": 0,
+        "seconds": 262.04
+      },
+      {
+        "os": "Windows",
+        "python": "3.13",
+        "passed": 872,
+        "skipped": 11,
+        "seconds": 234.18
+      }
+    ],
+    "windows_skips": {
+      "posix_pty_cases": 10,
+      "symlink_creation_requiring_native_privileges": 1
+    },
+    "installed_wheel": {
+      "all_three_jobs": "passed",
+      "install_schemes": [
+        "target",
+        "prefix"
+      ],
+      "packaged_themes": 28,
+      "console_entry_point": "passed",
+      "render_80x24": "passed"
+    },
+    "qualification": "This run qualifies the unchanged runtime and test content. Later documentation-only revisions and their final checks are recorded on PR #8."
+  },
   "limitations": [
     "Physical terminal input-to-presentation timing is not measured by the compositor probe.",
     "Source edits use the full Markdown parser; width/ASCII reflow reuses parsed Markdown.",
