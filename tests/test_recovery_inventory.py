@@ -132,3 +132,59 @@ def test_recovery_completion_after_closing_cannot_publish_or_consume_archive(tmp
         assert (workspace.store.directory/name).exists()
         assert not (workspace.store.directory/workspace.store.recovery_name).exists()
     finally: workspace.store.close()
+
+
+def test_inventory_keyset_cursor_ties_and_preserves_aggregate_counts(tmp_path):
+    store=m.StateStore(tmp_path/'state')
+    assert store.enabled and store.owns_lock
+    try:
+        names=[]
+        for index in range(29):
+            name='recovery-'+f'{index:032x}'+'.json'
+            path=store.directory/name
+            path.write_bytes(b'{}')
+            os.utime(path,ns=(10**18,10**18))
+            names.append(name)
+        first=store.recovery_inventory()
+        last=first['entries'][-1]
+        second=store.recovery_inventory(before=(last['mtime_ns'],last['name']))
+        observed=[item['name'] for item in first['entries']+second['entries']]
+        assert observed==list(reversed(names))
+        assert first['total']==second['total']==len(names)
+        assert first['bytes']==second['bytes']==2*len(names)
+    finally:
+        store.close()
+
+
+def test_deferred_offer_survives_concurrent_newer_archive_removal(tmp_path,monkeypatch):
+    state=tmp_path/'.mdbm'
+    state.mkdir()
+    source=tmp_path/'0.md'
+    source.write_text('disk')
+    # The sole matching archive begins at old index 24: deleting a newer
+    # entry between offset-based pages used to skip it at index 23.
+    for index in range(50):
+        root=tmp_path if index==25 else tmp_path/'elsewhere'
+        record=bundle(root,[f'unsaved {index}'])
+        path=state/('recovery-'+f'{index:032x}'+'.json')
+        path.write_text(json.dumps(record))
+        os.utime(path,ns=(10**18+index,10**18+index))
+    workspace=m.Workspace(config(tmp_path),source,restore=False)
+    try:
+        original=workspace.store.recovery_inventory
+        scanned=[]
+        def remove_newer_after_first_page(*args,**kwargs):
+            page=original(*args,**kwargs)
+            scanned.append(kwargs.get('before'))
+            if len(scanned)==1:
+                (state/('recovery-'+f'{49:032x}'+'.json')).unlink()
+            return page
+        monkeypatch.setattr(workspace.store,'recovery_inventory',remove_newer_after_first_page)
+        workspace._offer_recovery(source)
+        assert len(scanned)>=2 and scanned[0] is None and scanned[1] is not None
+        assert workspace.overlays[-1].title=='Unsaved recovery found'
+        workspace.overlays[-1].actions[0][1]()
+        assert workspace.doc.text=='unsaved 25'
+        assert source.read_text()=='disk'
+    finally:
+        workspace.store.close()
