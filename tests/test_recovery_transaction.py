@@ -578,3 +578,38 @@ def test_quota_never_undercounts_unstatable_entries_when_gc_is_suspended(
     assert obstacle.read_bytes()==b'inaccessible recovery pool bytes'
     assert not (store.directory/('content-'+new_digest+'.bin')).exists()
     assert store.read_recovery(name,4096)['documents'][0]['text']=='original unsaved work'
+
+
+@pytest.mark.parametrize('bad_first',[False,True])
+@pytest.mark.parametrize('operation',['write','partial_discard'])
+def test_conflicting_v3_shared_content_lengths_preserve_snapshot(
+        store,tmp_path,bad_first,operation):
+    """A duplicated digest cannot describe two different byte streams."""
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['original unsaved work']))
+    previous=(store.directory/name).read_bytes()
+    candidate=store.read(name)  # Deliberately exercise the v3 input path.
+    original=candidate['documents'][0]
+    good=dict(original,document_id='a'*32)
+    bad=dict(original,document_id='b'*32,bytes=original['bytes']+1)
+    candidate['documents']=[bad,good] if bad_first else [good,bad]
+    with pytest.raises(m.MDBMError,match='Inconsistent recovery content sizes'):
+        if operation=='write':
+            store.write(name,candidate)
+        else:
+            store.discard_recovery(name,remaining=candidate)
+    assert (store.directory/name).read_bytes()==previous
+    assert [doc['text'] for doc in store.read_recovery(name,4096)['documents']]==[
+        'original unsaved work']
+
+
+def test_v3_shared_content_with_consistent_lengths_still_publishes(store,tmp_path):
+    """Multiple documents may legitimately share one content-addressed blob."""
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['same text']))
+    candidate=store.read(name)
+    candidate['documents'].append(dict(candidate['documents'][0],document_id='b'*32))
+    store.write(name,candidate)
+    assert [doc['text'] for doc in store.read_recovery(name,4096)['documents']]==[
+        'same text','same text']
+    assert len(list(store.directory.glob('content-*.bin')))==1
