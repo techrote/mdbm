@@ -409,3 +409,37 @@ def test_fifo_primary_owner_record_cannot_stall_state_startup(tmp_path):
     finally:
         store.close()
     assert stat.S_ISFIFO(lock.lstat().st_mode)
+
+@pytest.mark.parametrize('owner_mode',['missing','inconsistent'])
+@pytest.mark.parametrize('partial',[False,True])
+def test_live_follower_slot_cannot_be_discarded_with_damaged_but_parseable_owner(store,tmp_path,owner_mode,partial):
+    """The filename lease is authoritative even when the manifest is parseable."""
+    follower=m.StateStore(store.directory)
+    assert follower.enabled and not follower.owns_lock
+    name=follower.recovery_name
+    archive=store.directory/name
+    try:
+        follower.write(name,bundle(tmp_path,['live follower unsaved text']))
+        record=store.recovery_metadata(name,4096)
+        assert record['owner']['token']==follower.token
+        if owner_mode=='missing':
+            record.pop('owner')
+        else:
+            record['owner']={'pid':os.getpid(),'token':'0'*32}
+        # Model an archive whose owner metadata was damaged by an external
+        # writer without invalidating its schema or content-addressed text.
+        store._write_json(name,record)
+        assert store.read_recovery(name,4096)['documents'][0]['text']=='live follower unsaved text'
+        original=archive.read_bytes()
+        assert not store.can_modify_recovery(name,record)
+        remaining=bundle(tmp_path,['unwanted partial replacement']) if partial else None
+        with pytest.raises(m.MDBMError,match='another instance owns'):
+            store.discard_recovery(name,remaining=remaining)
+        assert archive.read_bytes()==original
+    finally:
+        follower.close()
+    # Once the live lease really disappears, the primary may explicitly
+    # remove the archival slot; no automatic reclamation was performed.
+    assert store.can_modify_recovery(name,record)
+    store.discard_recovery(name)
+    assert not archive.exists()

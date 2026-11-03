@@ -2640,6 +2640,14 @@ class StateStore:
 
     def can_modify_recovery(self, name: str, record: Mapping[str,Any]) -> bool:
         if not self.owns_lock: return False
+        # A parseable archive may still have missing/inconsistent owner fields.
+        # Its tokenized filename also reserves a live follower's slot, as for
+        # publication and explicit deletion of unreadable archives. Do not let
+        # damaged metadata bypass that independent evidence of ownership.
+        match=re.fullmatch(r'recovery-([0-9a-f]{32})\.json',name)
+        if match and match.group(1)!=self.token and self.snapshot_live(
+                {'owner':{'token':match.group(1)}}):
+            return False
         owner=record.get('owner',{})
         return not self.snapshot_live(record) or (isinstance(owner,dict) and owner.get('token')==self.token)
 

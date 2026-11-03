@@ -117,7 +117,13 @@ storage publication API. A secondary instance may update only its own
 lease-token recovery slot; any existing unreadable archive is preserved for
 explicit inspection rather than silently overwritten. Partial archive
 replacement holds the publication guard from ownership verification through
-manifest publication and orphan collection. See
+manifest publication and orphan collection. Explicit discard and the inventory
+UI's mutability check also honor a live follower lease identified by the
+tokenized archive *filename*, independently of the manifest's owner fields.
+An otherwise parseable archive with missing or inconsistent owner metadata
+cannot be discarded or partially replaced while its original follower is live.
+The primary may explicitly discard it only after that follower's lease is
+demonstrably released. See
 [Recovery transaction continuation](RECOVERY_TRANSACTION_CONTINUATION_2026-11-03.md).
 
 The generic `StateStore.write` entry point also enforces this boundary. Names
