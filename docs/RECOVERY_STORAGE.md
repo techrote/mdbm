@@ -138,3 +138,12 @@ Content-addressed `content-<sha256>.bin` files are likewise excluded from generi
 JSON publication. These bytes can be created or repaired only while publishing
 a validated recovery manifest under `recovery.guard`; an ordinary state write
 cannot corrupt shared text referenced by multiple recovery archives.
+
+Recovery manifest and content reads use non-blocking, no-follow opens where
+supported and verify that the opened descriptor is a regular file. A FIFO,
+device, directory or replacement symlink at a recovery path therefore cannot
+indefinitely occupy `recovery.guard` or silently replace a valid archive.
+Unsafe material is rejected for inspection/publication; existing manifests
+and recovery content are not automatically deleted. POSIX regressions cover
+FIFO manifests and content blobs; Windows continues through its regular
+three-platform regression and installed-wheel qualification.
