@@ -97,7 +97,14 @@ guard proves a modern owner has gone even if its recorded PID was reused.
 Unversioned legacy records still receive the conservative, non-signalling
 process-liveness check. Unknown or inaccessible legacy owners are retained.
 
-Other instances use their own recovery slots and leases. Every manifest/blob
+Other instances use their own recovery slots and leases. A *missing*
+tokenized lease permits the owner to treat a foreign archive as stale, but an
+*existing unreadable or inconsistent* lease is not evidence that the process
+exited: the archive remains protected. The same fail-closed check applies to
+explicit removal of a damaged foreign archive. Only a demonstrably dead
+valid process PID or an actually removed lease permits that reclamation;
+invalid/unknown PIDs are preserved conservatively.
+Every manifest/blob
 publication, restore read, removal and garbage collection uses a separate
 `recovery.guard`, serializing these operations across primary and secondary
 instances. This prevents collection from deleting a blob between another
