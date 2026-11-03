@@ -2255,7 +2255,12 @@ class StateFileLock:
         self.fd: int | None=None
         if path.is_symlink() or getattr(path,'is_junction',lambda:False)():
             raise MDBMError('State guards must not be links.')
-        fd=os.open(path,os.O_RDWR|os.O_CREAT|getattr(os,'O_NOFOLLOW',0),0o600)
+        # Guard filenames may be tampered with externally. On POSIX a FIFO
+        # or device must not block *before* fstat can reject its type; this
+        # does not change flock's independent LOCK_NB/blocking semantics.
+        flags=os.O_RDWR|os.O_CREAT|getattr(os,'O_NOFOLLOW',0)
+        if os.name=='posix': flags|=getattr(os,'O_NONBLOCK',0)
+        fd=os.open(path,flags,0o600)
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode): raise MDBMError('Invalid state guard.')
             if os.fstat(fd).st_size==0: os.write(fd,b'0')

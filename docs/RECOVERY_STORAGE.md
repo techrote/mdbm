@@ -92,6 +92,15 @@ owner's metadata. Ownership JSON is fully written and flushed before an atomic
 no-clobber hard link publishes it. A crash cannot leave a partially written
 new ownership record.
 
+On POSIX, both kernel guard files are opened with `O_NONBLOCK` and
+`O_NOFOLLOW` before their descriptor types are validated. This avoids
+blocking on an externally substituted FIFO/device at `owner.guard` or
+`recovery.guard` before the regular-file test runs. This flag does **not**
+make requested blocking kernel-lock acquisition nonblocking: lock contention
+still follows the caller's explicit blocking policy. Special-file guards
+fail closed; existing snapshots are not removed. Windows retains descriptor
+validation and its documented path-level reparse-point limitations.
+
 Modern ownership records identify this protocol. Acquiring the unheld kernel
 guard proves a modern owner has gone even if its recorded PID was reused.
 Unversioned legacy records still receive the conservative, non-signalling

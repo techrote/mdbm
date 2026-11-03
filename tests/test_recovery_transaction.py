@@ -443,3 +443,27 @@ def test_live_follower_slot_cannot_be_discarded_with_damaged_but_parseable_owner
     assert store.can_modify_recovery(name,record)
     store.discard_recovery(name)
     assert not archive.exists()
+
+
+@pytest.mark.skipif(os.name!='posix' or not hasattr(os,'mkfifo'), reason='POSIX special-file guards only')
+@pytest.mark.parametrize('name',['owner.guard','recovery.guard'])
+def test_special_file_guards_use_nonblocking_open_and_fail_closed(tmp_path,monkeypatch,name):
+    """An injected non-regular guard must not stall before fstat validates it."""
+    directory=tmp_path/'state'
+    directory.mkdir()
+    path=directory/name
+    os.mkfifo(path)
+    original_open=os.open
+    opened=[]
+
+    def observe_open(candidate,flags,*args,**kwargs):
+        if os.fspath(candidate)==os.fspath(path):
+            opened.append(flags)
+        return original_open(candidate,flags,*args,**kwargs)
+
+    monkeypatch.setattr(os,'open',observe_open)
+    with pytest.raises(m.MDBMError,match='Invalid state guard'):
+        m.StateFileLock(path,blocking=True)
+    assert len(opened)==1
+    assert opened[0] & os.O_NONBLOCK
+    assert stat.S_ISFIFO(path.lstat().st_mode)
