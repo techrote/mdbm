@@ -91,6 +91,48 @@ def test_unknown_secondary_lease_pid_keeps_reserved_slot(store,tmp_path,unknown_
     assert not (store.directory/name).exists()
 
 
+def test_unreadable_foreign_lease_keeps_valid_snapshot_protected(store,tmp_path):
+    follower=m.StateStore(store.directory)
+    assert follower.enabled and not follower.owns_lock
+    try:
+        name=follower.recovery_name
+        follower.write(name,bundle(tmp_path,['follower unsaved']))
+        before=(store.directory/name).read_bytes()
+        lease=store.directory/f'lease-{follower.token}.json'
+        lease.write_bytes(b'{corrupted live lease')
+        # The missing/invalid read result is not proof that the process died.
+        assert store.read(lease.name,4096) is None
+        assert store.snapshot_live(store.recovery_metadata(name,4096))
+        with pytest.raises(m.MDBMError,match='another instance'):
+            store.write(name,bundle(tmp_path,['primary overwrite']))
+        with pytest.raises(m.MDBMError,match='another instance'):
+            store.discard_recovery(name)
+        assert (store.directory/name).read_bytes()==before
+    finally:
+        follower.close()
+
+
+def test_unreadable_foreign_lease_keeps_corrupt_archive_until_owner_closes(store,tmp_path):
+    follower=m.StateStore(store.directory)
+    assert follower.enabled and not follower.owns_lock
+    name=follower.recovery_name
+    archive=store.directory/name
+    lease=store.directory/f'lease-{follower.token}.json'
+    try:
+        original=b'{damaged recovery metadata'
+        archive.write_bytes(original)
+        lease.write_bytes(b'{damaged lease metadata')
+        with pytest.raises(m.MDBMError,match='instance is active'):
+            store.discard_recovery(name,allow_invalid=True)
+        assert archive.read_bytes()==original
+    finally:
+        follower.close()
+    # Once the follower actually releases/removes its lease, the primary may
+    # explicitly discard the unreadable archive; never delete it automatically.
+    store.discard_recovery(name,allow_invalid=True)
+    assert not archive.exists()
+
+
 def test_unreadable_existing_archive_is_not_silently_overwritten(store,tmp_path):
     name='recovery-'+('a'*32)+'.json'
     corrupt=b'{invalid metadata - preserve for inspection'
