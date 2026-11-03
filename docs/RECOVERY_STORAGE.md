@@ -139,12 +139,17 @@ JSON publication. These bytes can be created or repaired only while publishing
 a validated recovery manifest under `recovery.guard`; an ordinary state write
 cannot corrupt shared text referenced by multiple recovery archives.
 
-Recovery manifest and content reads validate the opened descriptor as a
-regular file, rather than trusting a path stat before opening. POSIX opens
-also use non-blocking and no-follow flags so FIFOs/devices and replacement
-symlinks cannot stall or redirect a read while `recovery.guard` is held.
+Recovery manifest, content and ordinary state-JSON reads validate the
+opened descriptor as a regular file, rather than trusting a path stat before
+opening. This includes `lock.json` during owner startup and tokenized leases
+during recovery-slot ownership checks: a present but unreadable special-file
+lease must still be treated as possibly live, without indefinitely holding
+`recovery.guard`. POSIX opens also use non-blocking and no-follow flags so
+FIFOs/devices and replacement symlinks cannot stall or redirect these reads.
 Windows retains path-level symlink/junction checks and descriptor validation;
 atomic no-follow reparse-point opening is not claimed there. Unsafe material
 fails closed for inspection/publication, without silently replacing the
 manifest. POSIX regressions cover FIFO manifests and content blobs, while
 the ordinary Windows regression and installed-wheel matrix remains required.
+Additional POSIX regressions cover FIFO lease records and owner startup; no
+claim is made that untrusted external processes cannot mutate the state folder.
