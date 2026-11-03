@@ -2528,19 +2528,38 @@ class StateStore:
             raise MDBMError('Invalid recovery content reference.')
         return self._path('content-'+digest+'.bin')
 
+    @staticmethod
+    def _open_recovery_regular(path: Path, text: bool = False) -> Any:
+        """Reject FIFOs/devices and avoid following replacement symlinks.
+
+        A non-regular archive or content blob must never block while the
+        shared recovery.guard is held. O_NONBLOCK prevents FIFO open waits;
+        fstat validates the opened descriptor instead of a racy path stat.
+        """
+        flags=os.O_RDONLY|getattr(os,'O_BINARY',0)|getattr(os,'O_NOFOLLOW',0)
+        if os.name=='posix': flags|=getattr(os,'O_NONBLOCK',0)
+        fd=os.open(path,flags)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise MDBMError('Recovery material is not a regular file.')
+            return os.fdopen(fd,'r',encoding='utf-8') if text else os.fdopen(fd,'rb')
+        except BaseException:
+            os.close(fd)
+            raise
+
     def _read_recovery(self, name: str, max_bytes: int, metadata_only: bool = False) -> dict[str,Any]:
         if not _RECOVERY_NAME.fullmatch(name): raise MDBMError('Invalid recovery snapshot name.')
         path=self._path(name)
         maximum=MAX_OPEN_DOCUMENTS*(6*max_bytes+RECOVERY_MANIFEST_BYTES)+RECOVERY_MANIFEST_BYTES
-        file_bytes=path.stat().st_size
-        if file_bytes>maximum: raise MDBMError('Recovery exceeds its aggregate size limit.')
-        with path.open('r',encoding='utf-8') as stream:
+        with self._open_recovery_regular(path,text=True) as stream:
+            file_bytes=os.fstat(stream.fileno()).st_size
+            if file_bytes>maximum: raise MDBMError('Recovery exceeds its aggregate size limit.')
             record=RecoveryJSONReader(stream,max_bytes,metadata_only,file_bytes).read()
         schema=record.get('schema')
         if schema not in ('mdbm-recovery/1.0','mdbm-recovery/2.0','mdbm-recovery/3.0'):
             raise MDBMError('Unsupported recovery format.')
         if schema=='mdbm-recovery/3.0':
-            if path.stat().st_size>RECOVERY_MANIFEST_BYTES: raise MDBMError('Recovery manifest exceeds its size limit.')
+            if file_bytes>RECOVERY_MANIFEST_BYTES: raise MDBMError('Recovery manifest exceeds its size limit.')
             docs=record.get('documents')
             if not isinstance(docs,list) or not docs or len(docs)>MAX_OPEN_DOCUMENTS:
                 raise MDBMError('Invalid recovery document set.')
@@ -2557,7 +2576,7 @@ class StateStore:
                 hydrated=[]
                 for item in docs:
                     blob=self._blob_path(item['content'])
-                    with blob.open('rb') as stream: raw=stream.read(item['bytes']+1)
+                    with self._open_recovery_regular(blob) as stream: raw=stream.read(item['bytes']+1)
                     if len(raw)!=item['bytes'] or hashlib.sha256(raw).hexdigest()!=item['digest']:
                         raise MDBMError('Recovery text failed its integrity check.')
                     hydrated.append(dict(item,text=raw.decode('utf-8')))
@@ -2745,8 +2764,9 @@ class StateStore:
         for digest,size in {item['content']:item['bytes'] for item in docs}.items():
             blob=self._blob_path(digest)
             if blob.exists():
-                previous_size=blob.stat().st_size
-                with blob.open('rb') as stream: previous=stream.read(size+1)
+                with self._open_recovery_regular(blob) as stream:
+                    previous_size=os.fstat(stream.fileno()).st_size
+                    previous=stream.read(size+1)
                 if len(previous)==size and hashlib.sha256(previous).hexdigest()==digest: continue
                 replaced_bytes+=previous_size
             missing[digest]=size
