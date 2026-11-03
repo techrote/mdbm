@@ -1,6 +1,6 @@
 # Theme catalogue
 
-This collection adds 21 themes to MDBM's six original file-based themes. All
+This collection adds 22 themes to MDBM's six original file-based themes. All
 appear in the existing theme picker; `minimal` remains the embedded recovery
 theme. Theme files are data and cannot run code or operate the workspace.
 
@@ -9,6 +9,18 @@ Launch an ID from this catalogue with:
 ```sh
 python mdbm.py --theme intaglio-bronze examples/solid-relief-showcase.md
 ```
+
+## Quiet Study: focused reading and writing
+
+[quiet-study](../themes/quiet-study.theme) pairs charcoal surfaces with warm
+light text, sage borders and a restrained fitted frame. It is static and
+reduces its ornamental margin in narrow, ASCII, monochrome and high-contrast
+contexts. Host-owned focus, selection and controls remain protected.
+
+Use it with the Writing, Reading or Review workspace presets; see
+[the workspace and appearance guide](MDBM_TUI_UX_SPEC.md).
+
+![Quiet Study in the Review workspace](screenshots/workspace-appearance/quiet-study-review.png)
 
 ## Sculpted environments: six connected material treatments
 

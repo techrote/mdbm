@@ -128,7 +128,7 @@ def test_recovery_bundle_keeps_document_identity_and_fingerprints(tmp_path):
     w.open_path(b); w.doc.move_to(1); w.doc.insert(' dirty-b')
     w.persist_recovery()
     assert w.store is not None
-    record=w.store.read(w.store.recovery_name)
+    record=w.store.read_recovery(w.store.recovery_name,w.files.max_bytes)
     assert record['schema']=='mdbm-recovery/2.0'
     assert len(record['documents'])==2
     w.store.close()

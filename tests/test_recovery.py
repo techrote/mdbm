@@ -47,7 +47,7 @@ def test_startup_recovery_rebinds_active_session_document(tmp_path):
         assert w.doc is w._active_state().doc
         assert w.doc.text=='disk-b recovered-b' and w.doc.dirty
         assert w._state_by_path(a).doc.text=='disk-a recovered-a'
-        persisted=w.store.read(w.store.recovery_name)
+        persisted=w.store.read_recovery(w.store.recovery_name,w.files.max_bytes)
         assert {d['text'] for d in persisted['documents']}=={'disk-a recovered-a','disk-b recovered-b'}
         assert a.read_text()=='disk-a' and b.read_text()=='disk-b'
     finally:
@@ -222,3 +222,90 @@ def test_unchanged_dirty_snapshot_is_not_rewritten(tmp_path,monkeypatch):
         assert not (tmp_path/'.mdbm'/'recovery.json').exists()
     finally:
         w.store.close()
+
+
+def legacy_record(root,path,text):
+    import hashlib
+    return {'schema':'mdbm-recovery/1.0','root':str(root),'path':str(path),
+            'text':text,'digest':hashlib.sha256(text.encode()).hexdigest(),
+            'baseline':hashlib.sha256(b'disk').hexdigest(),'fingerprint':None}
+
+
+def test_legacy_restore_preserves_unrelated_active_dirty_buffer(tmp_path):
+    w=m.Workspace(config(tmp_path),restore=False,persist=False)
+    w.doc.insert('current unsaved '); original=w.doc; original_id=w.active_document_id
+    w.restore_recovery(legacy_record(tmp_path,tmp_path/'legacy.md','recovered'))
+    assert w.doc.text=='recovered' and w.doc.path==tmp_path/'legacy.md'
+    assert w._state_by_id(original_id).doc is original
+    assert original.text.startswith('current unsaved ') and original.dirty
+
+
+def test_legacy_restore_rejects_dirty_matching_path(tmp_path):
+    path=tmp_path/'legacy.md'; path.write_text('disk')
+    w=m.Workspace(config(tmp_path),path,restore=False,persist=False)
+    w.doc.insert('current unsaved '); original=w.doc
+    with pytest.raises(m.MDBMError,match='current unsaved'):
+        w.restore_recovery(legacy_record(tmp_path,path,'recovered'))
+    assert w.doc is original and w.doc.text=='current unsaved disk'
+    assert len(w.documents)==1
+
+
+def test_legacy_restore_targets_clean_inactive_path_without_duplicate(tmp_path):
+    path=tmp_path/'legacy.md'; path.write_text('disk')
+    w=m.Workspace(config(tmp_path),path,restore=False,persist=False)
+    target_id=w.active_document_id
+    w.new_document(); w.doc.insert('other unsaved'); other=w.doc; other_id=w.active_document_id
+    w.restore_recovery(legacy_record(tmp_path,path,'recovered'))
+    assert w.active_document_id==target_id and w.doc.text=='recovered'
+    assert len(w.documents)==2 and w._state_by_id(other_id).doc is other
+    assert other.text=='other unsaved'
+
+
+def test_full_bundle_retires_only_automatic_pristine_placeholder(tmp_path):
+    from test_recovery_storage import bundle
+    record=bundle(tmp_path,[f'recovered {i}' for i in range(m.MAX_OPEN_DOCUMENTS)])
+    w=m.Workspace(config(tmp_path),restore=False,persist=False)
+    old_id=w.active_document_id
+    w.restore_recovery_bundle(record)
+    assert len(w.documents)==m.MAX_OPEN_DOCUMENTS
+    assert w._state_by_id(old_id) is None
+    assert {state.doc.text for state in w.documents}=={f'recovered {i}' for i in range(m.MAX_OPEN_DOCUMENTS)}
+
+
+@pytest.mark.parametrize('user_buffer',['edited welcome','new empty'])
+def test_full_bundle_capacity_never_retires_user_buffers(tmp_path,user_buffer):
+    from test_recovery_storage import bundle
+    record=bundle(tmp_path,[f'recovered {i}' for i in range(m.MAX_OPEN_DOCUMENTS)])
+    w=m.Workspace(config(tmp_path),restore=False,persist=False)
+    if user_buffer=='edited welcome': w.doc.insert('user changes ')
+    else: w.new_document()
+    original=[(state.id,state.doc,state.doc.text) for state in w.documents]
+    with pytest.raises(m.MDBMError,match='open-document limit'):
+        w.restore_recovery_bundle(record)
+    assert [(state.id,state.doc,state.doc.text) for state in w.documents]==original
+
+
+def test_full_bundle_restores_after_last_document_closed(tmp_path):
+    from test_recovery_storage import bundle
+    w=m.Workspace(config(tmp_path),restore=False,persist=False)
+    w.close_document()
+    assert len(w.documents)==1 and w.doc.text==''
+    w.restore_recovery_bundle(bundle(tmp_path,[f'recovered {i}' for i in range(m.MAX_OPEN_DOCUMENTS)]))
+    assert len(w.documents)==m.MAX_OPEN_DOCUMENTS
+
+
+def test_full_32_document_v3_snapshot_restores_on_recovery_only_startup(tmp_path):
+    from test_recovery_storage import bundle
+    old=m.StateStore(tmp_path/'.mdbm')
+    old.write(old.recovery_name,bundle(tmp_path,[f'recovered {i}' for i in range(m.MAX_OPEN_DOCUMENTS)]))
+    old.close()
+    w=m.Workspace(config(tmp_path))
+    try:
+        assert len(w.documents)==1 and w._active_state().placeholder
+        choose(w,'Restore')
+        assert len(w.documents)==m.MAX_OPEN_DOCUMENTS
+        assert all(state.doc.dirty and not state.placeholder for state in w.documents)
+        record=w.store.read_recovery(w.store.recovery_name,w.files.max_bytes)
+        assert len(record['documents'])==m.MAX_OPEN_DOCUMENTS
+        assert len(list(w.store.directory.glob('recovery*.json')))==1
+    finally: w.store.close()

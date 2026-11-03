@@ -1,0 +1,52 @@
+{
+  "schema": "mdbm-responsiveness/1.0",
+  "version": "1.0.0a4",
+  "source_sha256": "fc16e5b2638cbaee25afc40524dd22c4697ecf9de843972ef0550b6e5c496b2a",
+  "python": "3.12.14",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.39",
+  "measurement": "input handler to composed cells; excludes physical terminal presentation",
+  "source_lines": 100001,
+  "source_utf8_bytes": 2263890,
+  "initial": {
+    "total_seconds": 12.722,
+    "input_to_composed_frame": {
+      "samples": 458,
+      "p50_ms": 7.879,
+      "p95_ms": 15.296,
+      "max_ms": 388.289
+    },
+    "composition_only": {
+      "samples": 458,
+      "p50_ms": 7.721,
+      "p95_ms": 15.075,
+      "max_ms": 388.101
+    },
+    "request_ms": 0.017,
+    "parse_seconds": 5.312,
+    "layout_seconds": 7.388
+  },
+  "width_only_reflow": {
+    "total_seconds": 8.447,
+    "input_to_composed_frame": {
+      "samples": 330,
+      "p50_ms": 10.342,
+      "p95_ms": 13.622,
+      "max_ms": 493.471
+    },
+    "composition_only": {
+      "samples": 330,
+      "p50_ms": 10.225,
+      "p95_ms": 13.382,
+      "max_ms": 493.363
+    },
+    "request_ms": 0.037,
+    "layout_seconds": 8.382
+  },
+  "parser_calls_across_initial_and_reflow": 1,
+  "open_buffer_search": {
+    "documents": 8,
+    "aggregate_source_utf8_bytes": 18111120,
+    "request_ms": 0.1,
+    "total_seconds": 0.009
+  }
+}

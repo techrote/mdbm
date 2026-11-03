@@ -18,6 +18,22 @@ Theme bytes ≤1 MiB; named objects ≤4096; nesting/reference depth ≤16; inhe
 
 Files and recovery have explicit size limits. Undo uses bounded edit deltas rather than unbounded full-document snapshots. Background parsing has one running job and a latest-generation request, not an unbounded queue. Script output has a fixed byte budget while the pipe continues to drain.
 
+Recovery v3 accepts at most 32 documents, each within the configured UTF-8
+source-byte limit, and a manifest at most 16 MiB. The pool accounts for both
+manifests and content blobs, with a limit of
+`max(64 MiB, 4 × (32 × max_file_bytes + 16 MiB))`. Exceeding a limit preserves
+the previous published snapshot and reports an error. Archived snapshots
+are not automatically evicted. Content collection removes only blobs proved
+unreferenced under the shared publication guard; an unreadable archive prevents
+collection because it may still reference useful data.
+
+The preview worker's extra LRU is limited to four parses and eight Mi source
+characters. Search has one pending query and one latest result, with at most
+200 matches. Disk work has at most 72 accepted jobs; replaceable pending state
+jobs are coalesced and no accepted atomic write is silently abandoned. These
+are explicit work limits, not a claim that Python object memory equals source
+byte size or that full-document parsing has constant latency.
+
 ## File system
 
 Workspace operations reject traversal outside the canonical root and symbolic-link components, including safe-looking links pointing back into the root. `.mdbm` internals are not user mutation targets. Saves use a temporary sibling, fsync, content-fingerprint conflict checks and atomic publication. Creation uses an exclusive no-clobber path. Reads and saves recheck path safety. Unix no-follow file flags are used where available. This is protection against malicious file names, links and ordinary concurrent edits, not a claim of isolation against a hostile process with the same OS account racing directory replacement. Windows junction/reparse behavior requires the native acceptance pass.
@@ -25,6 +41,13 @@ Workspace operations reject traversal outside the canonical root and symbolic-li
 Local links resolve relative to the active source and must remain within the workspace. Only HTTP, HTTPS and mailto may be handed to a browser, after explicit confirmation; credential-bearing URLs and terminal controls are rejected. No Markdown image is fetched. External links never become shell commands or user-supplied process argument lists; confirmed URLs are passed only to the browser dispatcher.
 
 Recovery files are plaintext, private-permission local data, not encrypted. Treat the workspace account as trusted. Recovery preserves the old disk fingerprint so restoring a snapshot cannot erase a subsequent external edit without conflict confirmation. Malformed or oversized state is ignored with a diagnostic. The state directory may not be a symbolic link. Concurrent state writers are isolated or locked; normal document conflict guards remain in force regardless.
+
+Primary ownership uses a lifetime OS lock on a persistent guard, with atomic
+complete ownership metadata. Another guard serializes recovery read,
+publication, discard and collection across instances. Live secondary snapshots
+cannot be consumed by a different instance. Deferred UI reads also carry
+workspace/modal ownership, so cancellation, workspace replacement or shutdown
+cannot publish a late restore into an unrelated buffer.
 
 ## Scripts
 

@@ -1,6 +1,6 @@
 # MDBM product specification
 
-Status: Implementation contract for 1.0.0a3. The delivered implementation report records verification limits; it does not override this contract.
+Status: Implementation contract for 1.0.0a4. The delivered implementation report records verification limits; it does not override this contract.
 
 ## Authority and precedence
 
@@ -42,12 +42,21 @@ non-overlapping matches in tab/source order, with one-based source-character
 line/column locations. Results are read-only until explicit activation and
 must match the same document object, generation and text slice before
 selection/navigation. Closed or changed documents invalidate old results.
+Interactive search is cancellable background work with bounded pending and
+result slots. Cancellation or closing its overlay prevents late publication.
 
 Save All processes dirty documents in tab order through the existing Save,
 Save As and conflict flows. It stops on cancellation or error; successful
 earlier saves remain published. Completion restores the original active
 document. It is a sequence of guarded file saves, not a multi-file atomic
 transaction.
+
+Interactive open/save and session/recovery publication run on a bounded,
+ordered background disk worker. A save owns immutable source and file-policy
+snapshots; completion updates only the originating live document. Edits made
+after submission remain dirty. A guarded continuation cannot close or discard
+those newer edits, and source/destination paths remain reserved while saving.
+Shutdown drains accepted writes before releasing state ownership.
 
 Input dialogs support selection, Home/End, paste, Delete/Backspace and history-free text entry. Destructive dialogs default to Cancel. Dirty navigation/exit offers Save, Discard and Cancel. Save As and conflict confirmations are chained without losing the pending operation. The theme chooser previews on keyboard highlight or deliberate click, commits with Enter or a second activation, and rolls back on Escape. Selected theme and dynamic layout are persisted in session state; hand-edited configuration comments are untouched.
 
@@ -61,3 +70,19 @@ the current session's write slot. Deferred snapshots survive Later,
 keeps unselected sibling records. Recovery validates applicable document
 identities, paths, integrity and capacity before mutating the workspace and
 refuses to replace differing current unsaved content.
+
+The recovery writer and reader use the same per-document UTF-8 limits. New
+bundles separate bounded manifests from integrity-checked content blobs;
+legacy single/multi-document bundles remain readable. The recovery inventory
+must expose every retained snapshot through bounded newest-first pages.
+Discard is explicit and confirmed; unreferenced content can be reclaimed
+through the inventory and after safe publication. Retention never silently
+deletes a recoverable archive to make room. A quota
+failure preserves the previous published snapshot and reports the problem.
+OS-held ownership guards prevent simultaneous stale reclaimers from acquiring
+the same primary slot. Live secondary-instance snapshots are protected.
+
+Named workspace presets, temporary maximize/restore and committed appearance
+preferences follow [the tailored tile-native UI contract](MDBM_TUI_UX_SPEC.md).
+Layout and appearance previews are transactions; cancellation restores the
+prior state and uncommitted choices never leak into session writes.

@@ -14,7 +14,7 @@ class ControlledWorker:
         self.result = None
         self.requests = []
 
-    def request(self, *job):
+    def request(self, *job, **kwargs):
         self.requests.append(job)
         self.pending = job
 

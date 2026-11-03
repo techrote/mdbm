@@ -1,5 +1,10 @@
 # MDBM 1.0.0a3 — review, implementation plan and verification
 
+This is the first-pass record. The [1.0.0a4 continuation](EXTENSION_PASS_2026-11-03.md)
+implements its recovery-storage/inventory, concurrency, large-document and
+workspace/appearance follow-up. Original findings and measurements below are
+retained as historical evidence.
+
 Date: 3 November 2026. Review base:
 [`a826b4f6d3803b8ec88542cc0a9c4bd9138607ed`](https://github.com/techrote/mdbm/commit/a826b4f6d3803b8ec88542cc0a9c4bd9138607ed).
 

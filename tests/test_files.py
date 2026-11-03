@@ -82,7 +82,7 @@ def test_recovery_fingerprint_integrity(workspace,tmp_path):
     w=workspace;p=tmp_path/'note.md';p.write_text('base')
     doc=m.DocumentModel.loaded(w.files.load(p));doc.insert('unsaved ')
     store=m.StateStore(tmp_path/'.mdbm');store.recovery(doc,w.files.root)
-    record=store.read(store.recovery_name)
+    record=store.read_recovery(store.recovery_name,w.files.max_bytes)
     p.write_text('externally changed');w.restore_recovery(record)
     assert w.doc.text=='unsaved base' and w.doc.dirty
     with pytest.raises(m.ConflictError):w.files.save(p,w.doc.text,w.doc.fingerprint)

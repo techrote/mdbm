@@ -2,12 +2,17 @@
 
 **A cell-native Markdown reader/editor for the terminal.**
 
-Version **1.0.0a3** is a runnable implementation alpha, not a declaration that every acceptance gate in the supplied plan has passed. The application has one runtime Python source, `mdbm.py`. Themes are validated TOML data; they cannot execute code or operate the editor.
+Version **1.0.0a4** is a runnable implementation alpha, not a declaration that every acceptance gate in the supplied plan has passed. The application has one runtime Python source, `mdbm.py`. Themes are validated TOML data; they cannot execute code or operate the editor.
 
 The [November 2026 improvement pass](docs/IMPROVEMENT_PASS_2026-11-03.md)
 adds a searchable document switcher, search across open buffers, and guarded
 Save All. It also repairs multi-document recovery, preview handoffs,
 Windows state-lock probing, installed theme discovery, and ongoing CI.
+
+The [continuation](docs/EXTENSION_PASS_2026-11-03.md) adds bounded per-document
+recovery storage and a recovery inventory, background file/state work and
+open-buffer search, cached Markdown reflow, deferred fragment navigation,
+workspace presets, maximize/restore and transactional appearance controls.
 
 ![Actual composed cells: Neon Circuitry](docs/screenshots/neon-circuitry.png)
 
@@ -81,12 +86,22 @@ Edit. Results are capped at 200; a changed or closed document cannot reuse
 an obsolete result. This command searches open buffers only; it does not
 scan unopened files on disk.
 
+Interactive searches run in a cancellable background job. Escape closes the
+search without publishing a late result. Only one pending query is retained;
+editing or closing a buffer still invalidates that buffer's old matches.
+
 **File → Save all changed documents** saves dirty buffers in tab order.
 Untitled buffers prompt for Save As, and changed destinations retain the
 usual conflict confirmation. Cancel or an error stops the remaining saves;
 earlier successful saves remain on disk. When the batch finishes, the
 original document becomes active again. All these commands are also
 available through **Ctrl+P**.
+
+Interactive opens and saves run in the background. You can keep typing while
+a save finishes; the submitted text is saved and any newer edits stay dirty.
+A guarded close/quit or Save All continuation stops if newer unsaved edits
+remain. Pending saves reserve both their source and destination until the
+controller acknowledges completion.
 
 ### Drag-and-drop files in a terminal
 
@@ -138,7 +153,21 @@ Saves publish atomically and check disk fingerprints. Existing destinations, cha
 
 ## Appearance and configuration
 
-The [theme catalogue](docs/THEME_CATALOG.md) lists **21 additional themes** with
+**Tile → Choose workspace preset…** offers Default, Writing, Reading and Review
+layouts, together with up to eight named custom layouts. Preview a layout,
+then apply it or cancel; per-document cursors, selections and scroll memories
+survive the change. Focused-tile maximize/restore temporarily expands the
+current tile without replacing the saved split layout; **Alt+M** invokes it.
+
+**Theme → Appearance and accessibility…** previews colour depth, ASCII rendering, high contrast,
+motion and spacing in one panel. Apply commits the choices; Escape/Cancel
+restores the previous settings. Only committed preferences enter session
+state, and `mdbm.conf` remains untouched. The static **Quiet Study** theme
+provides a restrained reading/writing option with narrow, ASCII and monochrome
+fallbacks. The [tailored UI contract](docs/MDBM_TUI_UX_SPEC.md) records the
+source-pinned design decisions and qualification boundaries.
+
+The [theme catalogue](docs/THEME_CATALOG.md) lists **22 additional themes** with
 launch IDs, guides and previews, alongside the six original file-based themes.
 
 The **Solid material relief** collection develops the sculpted trio into six
@@ -202,8 +231,18 @@ subsequent launch. Opening a specific file and restoring or discarding its
 recovery preserves the other documents in the same bundle. Recovery is
 validated before changing the open buffers, and differing current unsaved
 text is never silently replaced. Unchanged recoverable state does not
-rewrite the snapshot every interval. See the improvement report for the
-remaining aggregate-size and simultaneous-startup limitations.
+rewrite the snapshot every interval.
+
+New recovery bundles use small manifests and individually checked UTF-8
+content blobs, with the same source-byte limit on writing and reading. Old
+version 1/2 snapshots remain readable. The recovery inventory exposes deferred
+snapshots in newest-first pages, including snapshots beyond the former
+64-entry discovery cutoff. Restore and discard are explicit, and archived
+snapshots do not expire silently. Storage-limit failures preserve the previous
+valid snapshot and appear as diagnostics. A persistent OS-held guard serializes
+primary-owner acquisition, including simultaneous attempts to reclaim a dead
+session. See the continuation report for the storage budgets and migration
+details.
 
 Scripts are trusted programs, **not a sandbox**. Only explicitly allowlisted `.py` siblings of `mdbm.py` are shown; `mdbm.py` itself is excluded. Arguments must be a JSON array such as `["a path with spaces", "--check"]`. The host invokes the current interpreter with shell disabled and captures bounded output. Themes and documents cannot launch them. POSIX cancellation terminates the process group; Windows cancellation currently targets the launched process, not every descendant.
 
@@ -218,11 +257,11 @@ python tests/render_animation_gallery.py
 ```
 
 The current source-bound results and remaining findings are recorded in
-[the improvement report](docs/IMPROVEMENT_PASS_2026-11-03.md). The permanent
+[the continuation report](docs/EXTENSION_PASS_2026-11-03.md). The permanent
 [CI workflow](.github/workflows/tests.yml) runs the full suite on Ubuntu
 with Python 3.11 and 3.13 and on Windows with Python 3.13. Every job requires
 the real Markdown plugins, builds a wheel, and checks installed console
-entry points plus all 27 packaged themes in both target and prefix layouts.
+entry points plus all packaged themes in both target and prefix layouts.
 
 The suite includes **96 deterministic golden configurations**, real POSIX
 pseudo-terminal interactions, recovery/data-loss regressions, deterministic
@@ -238,7 +277,15 @@ The 513-test/bootstrap-parser measurements in the original implementation
 report are retained as historical evidence. This pass installs and tests
 the declared release dependencies without weakening their bounds.
 
-Native Windows Terminal, macOS/Linux GUI-terminal acceptance, end-to-end latency under load, and accessibility/flash auditing remain open. Large-document parsing is full-document, not incremental: the historical 100,000-line probe took approximately **22 seconds** to generate its preview with approximately **191 MiB** process peak memory. File operations/recovery writes and open-buffer search remain synchronous. Do not equate fast small-document composition with passing the full latency requirement.
+Native Windows Terminal, macOS/Linux GUI-terminal acceptance, reference-machine
+end-to-end latency and accessibility/flash auditing remain open. Source edits
+still use a full-document Markdown parse in the background. Width/ASCII reflow
+reuses valid parsed Markdown, fragment navigation waits for matching preview
+work, and open-buffer search plus file/recovery publication run off the
+interactive input loop. The continuation records large-document measurements,
+including tail latency; compositor timing alone does not qualify physical
+terminal latency. Startup restoration, filesystem enumeration and some
+administrative file operations remain synchronous.
 
 Start with copies of valuable documents while evaluating this alpha. The exact delivered scope, remaining gaps, measurements and commands are in **`docs/IMPLEMENTATION_REPORT.md`**.
 

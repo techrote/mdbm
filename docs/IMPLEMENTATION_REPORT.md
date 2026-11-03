@@ -1,13 +1,15 @@
 # MDBM implementation and verification report
 
-## Current increment: 1.0.0a3
+## Current increment: 1.0.0a4
 
-See [the 3 November 2026 review, implementation plan and verification
-record](IMPROVEMENT_PASS_2026-11-03.md) for the current changes and source-bound
-results. The current suite runs with the declared release dependencies and a
-permanent Linux/Windows CI workflow. Multi-document tabs, terminal path ingress,
-the document picker, open-buffer search and guarded Save All extend the
-original build below.
+See [the continuation's review, implementation plan and verification
+record](EXTENSION_PASS_2026-11-03.md) for recovery storage/inventory, background
+I/O and search, cached reflow, workspace presets and appearance transactions.
+[The earlier pass](IMPROVEMENT_PASS_2026-11-03.md) records the document picker,
+Save All, preview/recovery repairs and permanent Linux/Windows CI. Current
+qualification uses the declared release dependencies. Historical limitations
+below describe the original delivery and are superseded only where the newer
+records provide implementation and evidence.
 
 The remainder of this report preserves the **historical 1.0.0a2 delivery**.
 Its 513-test count, bootstrap-dependency caveat and performance measurements
