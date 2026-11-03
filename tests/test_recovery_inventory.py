@@ -188,3 +188,32 @@ def test_deferred_offer_survives_concurrent_newer_archive_removal(tmp_path,monke
         assert source.read_text()=='disk'
     finally:
         workspace.store.close()
+
+def test_compatibility_candidates_survive_concurrent_newer_archive_removal(tmp_path,monkeypatch):
+    """A deletion between pages must not skip an older complete legacy bundle."""
+    store=m.StateStore(tmp_path/'state')
+    assert store.enabled and store.owns_lock
+    try:
+        for index in range(50):
+            name='recovery-'+f'{index:032x}'+'.json'
+            path=store.directory/name
+            path.write_text(json.dumps(bundle(tmp_path,[f'unsaved {index}'])))
+            os.utime(path,ns=(10**18+index,10**18+index))
+        original=store.recovery_inventory
+        cursors=[]
+        def discard_after_first_page(*args,**kwargs):
+            page=original(*args,**kwargs)
+            cursors.append(kwargs.get('before'))
+            if len(cursors)==1:
+                (store.directory/('recovery-'+f'{49:032x}'+'.json')).unlink()
+            return page
+        monkeypatch.setattr(store,'recovery_inventory',discard_after_first_page)
+        found=[(name,record['documents'][0]['text'])
+               for name,record in store.recovery_candidates(16*1024*1024)]
+        expected=[('recovery-'+f'{i:032x}'+'.json',f'unsaved {i}')
+                  for i in reversed(range(49))]
+        assert found==expected
+        assert len(cursors)>=3 and cursors[0] is None and cursors[1] is not None
+        assert any('Ignoring recovery-' in msg for msg in store.diagnostics)
+    finally:
+        store.close()

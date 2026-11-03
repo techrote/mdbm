@@ -2729,17 +2729,22 @@ class StateStore:
             self._collect_orphan_blobs(); SafeFiles._sync_dir(self.directory)
 
     def recovery_candidates(self, max_bytes: int) -> Iterator[tuple[str,dict[str,Any]]]:
-        """Compatibility iterator; UI inventory uses metadata and lazy reads."""
+        """Compatibility iterator; use keyset paging like startup discovery.
+
+        A concurrent discard must not shift older archives behind a mutable
+        positional offset and silently omit a recoverable buffer.
+        """
         if not self.enabled: return
-        offset=0
+        before: tuple[int,str] | None = None
         while True:
-            page=self.recovery_inventory(offset)
+            page=self.recovery_inventory(before=before)
             for item in page['entries']:
                 try: yield item['name'],self.read_recovery(item['name'],max_bytes)
                 except (OSError,UnicodeError,MDBMError,ValueError) as exc:
                     self.diagnostics.append('Ignoring '+item['name']+': '+display_text(exc))
-            offset+=page['limit']
-            if offset>=page['total']: return
+            if not page['entries']: return
+            last=page['entries'][-1]
+            before=(last['mtime_ns'],last['name'])
 
     def close(self) -> None:
         if self.enabled:
