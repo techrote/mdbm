@@ -1,5 +1,7 @@
 """Cross-process recovery ownership and partial-archive publication regression."""
 import hashlib
+import subprocess
+import sys
 
 import pytest
 
@@ -61,12 +63,32 @@ def test_primary_cannot_preempt_live_secondary_slot_before_first_snapshot(store,
 
 
 def test_dead_secondary_lease_does_not_block_stale_slot_reuse(store,tmp_path):
+    # PID -1 is invalid/unknown and deliberately considered live. Reap a
+    # real child instead, exercising the native dead-owner probe on both
+    # POSIX and Windows without weakening conservative ownership checks.
+    dead=subprocess.Popen([sys.executable,'-c','pass'],
+                          stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL)
+    assert dead.wait(timeout=10)==0
+    assert not m._process_alive(dead.pid)
     token='f'*32
     name=f'recovery-{token}.json'
     store._write_json(f'lease-{token}.json',
-                      {'pid':-1,'token':token,'primary':False})
+                      {'pid':dead.pid,'token':token,'primary':False})
     store.write(name,bundle(tmp_path,['reclaimed archive']))
     assert store.read_recovery(name,4096)['documents'][0]['text']=='reclaimed archive'
+
+
+@pytest.mark.parametrize('unknown_pid',[None,False,-1,0,'not-a-pid',2**31])
+def test_unknown_secondary_lease_pid_keeps_reserved_slot(store,tmp_path,unknown_pid):
+    # An inaccessible/unverifiable owner is never proof of a dead owner.
+    token='e'*32
+    name=f'recovery-{token}.json'
+    store._write_json(f'lease-{token}.json',
+                      {'pid':unknown_pid,'token':token,'primary':False})
+    with pytest.raises(m.MDBMError,match='reserved this recovery slot'):
+        store.write(name,bundle(tmp_path,['must not preempt unknown owner']))
+    assert not (store.directory/name).exists()
 
 
 def test_unreadable_existing_archive_is_not_silently_overwritten(store,tmp_path):
