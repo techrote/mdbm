@@ -64,3 +64,15 @@ their internal lifecycle; primary session writes and each instance's recovery
 publication remain unchanged. Tests cover session preservation, attempts to
 forge the primary and follower's owner/lease records, the live-follower
 recovery boundary, and repeated legitimate primary session writes.
+
+
+## Shared recovery-blob dispatch boundary
+
+The same generic writer also accepted `content-<sha256>.bin` paths, because the
+internal path validator permits recovery blobs and `StateStore.write` only
+special-cased recovery JSON names. An arbitrary JSON write to that blob would
+corrupt all manifests sharing it, without the publication guard. Generic blob
+writes now fail before any filesystem mutation. Valid content creation and
+repair remain private to the guarded recovery publisher. A shared-blob
+regression exercises both primary and secondary write attempts and verifies
+that both archives remain hydratable.

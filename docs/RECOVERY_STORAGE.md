@@ -125,3 +125,9 @@ own recovery slots, but cannot overwrite the primary's session on disk.
 lifecycle and cannot be written through generic `StateStore.write`, because
 forged owner metadata could make a live recovery archive appear reclaimable.
 The primary's ordinary session writes remain supported.
+
+
+Content-addressed `content-<sha256>.bin` files are likewise excluded from generic
+JSON publication. These bytes can be created or repaired only while publishing
+a validated recovery manifest under `recovery.guard`; an ordinary state write
+cannot corrupt shared text referenced by multiple recovery archives.

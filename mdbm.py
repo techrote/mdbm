@@ -2498,6 +2498,11 @@ class StateStore:
         # Allowing their replacement can make a live owner appear stale.
         if name=='lock.json' or _STATE_LEASE_NAME.fullmatch(name):
             raise MDBMError('Ownership metadata is internal; state write rejected.')
+        # Content-addressed blobs are not JSON state. Only guarded recovery
+        # publication may create or repair them; otherwise a public write
+        # can silently corrupt every snapshot sharing the same digest.
+        if _RECOVERY_BLOB.fullmatch(name):
+            raise MDBMError('Recovery content requires guarded publication; blob retained.')
         # A secondary must not replace the primary's last session, even
         # though its own unsaved work is written to an isolated recovery slot.
         if name=='session.json' and not self.owns_lock:

@@ -172,3 +172,23 @@ def test_primary_session_publication_still_works(store):
     store.write('session.json',{'schema':'mdbm-session/2.0','documents':[],'marker':'first'})
     store.write('session.json',{'schema':'mdbm-session/2.0','documents':[],'marker':'second'})
     assert store.read('session.json')['marker']=='second'
+
+
+def test_generic_json_write_cannot_corrupt_shared_recovery_content(store,tmp_path):
+    text='unique unsaved recovery text'
+    store.write(store.recovery_name,bundle(tmp_path,[text]))
+    name='recovery-'+('e'*32)+'.json'
+    store.write(name,bundle(tmp_path,[text]))
+    blob=next(store.directory.glob('content-*.bin'))
+    original=blob.read_bytes()
+    follower=m.StateStore(store.directory)
+    assert follower.enabled and not follower.owns_lock
+    try:
+        for actor in (store,follower):
+            with pytest.raises(m.MDBMError,match='Recovery content requires guarded publication'):
+                actor.write(blob.name,{'invalid':'replacement of shared text'})
+            assert blob.read_bytes()==original
+        for snapshot in (store.recovery_name,name):
+            assert store.read_recovery(snapshot,4096)['documents'][0]['text']==text
+    finally:
+        follower.close()
