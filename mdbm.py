@@ -2698,6 +2698,14 @@ class StateStore:
         """Prevent a secondary or another live owner replacing a recovery slot."""
         if not self.owns_lock and name!=self.recovery_name:
             raise MDBMError('Snapshot retained: another instance owns it.')
+        # The token in a follower's archive filename reserves its slot as
+        # soon as its live lease is published, even before its first snapshot.
+        # Otherwise the primary could preempt that empty path, and the
+        # follower's next save would then fail the foreign-owner check.
+        match=re.fullmatch(r'recovery-([0-9a-f]{32})\.json',name)
+        if match and match.group(1)!=self.token and self.snapshot_live(
+                {'owner':{'token':match.group(1)}}):
+            raise MDBMError('Snapshot retained: another instance has reserved this recovery slot.')
         path=self._path(name)
         if not path.exists(): return
         try: previous=self._read_recovery(name,self.max_recovery_bytes,True)

@@ -66,6 +66,24 @@ forge the primary and follower's owner/lease records, the live-follower
 recovery boundary, and repeated legitimate primary session writes.
 
 
+## Reserved recovery slot before first publication
+
+Review of the guarded writer exposed one more cross-instance gap: owner
+validation formerly returned immediately when the target path did not exist.
+A primary instance could claim a live secondary's tokenized recovery name
+before that secondary had written any snapshot. The secondary's legitimate
+first save would then be rejected as an overwrite of a foreign live owner,
+leaving unsaved work without its expected recovery slot.
+
+The writer now checks the name's token against the active lease before the
+file-existence shortcut, under the same recovery publication guard. A live
+follower retains its reserved slot from initialization onward; a missing or
+dead lease does not indefinitely block an archive name. Two regressions
+exercise the first-snapshot reservation, repeated follower updates and
+stale-lease reuse. This closes a cooperative API ownership gap; it does not
+claim to defend against malicious direct filesystem mutation by another
+process with the same OS permissions.
+
 ## Shared recovery-blob dispatch boundary
 
 The same generic writer also accepted `content-<sha256>.bin` paths, because the

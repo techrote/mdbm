@@ -43,6 +43,32 @@ def test_secondary_can_update_its_own_snapshot(store,tmp_path):
         secondary.close()
 
 
+def test_primary_cannot_preempt_live_secondary_slot_before_first_snapshot(store,tmp_path):
+    follower=m.StateStore(store.directory)
+    assert follower.enabled and not follower.owns_lock
+    try:
+        name=follower.recovery_name
+        assert not (store.directory/name).exists()
+        with pytest.raises(m.MDBMError,match='another instance has reserved'):
+            store.write(name,bundle(tmp_path,['primary preemption']))
+        assert not (store.directory/name).exists()
+        # The follower's first and later writes must remain available.
+        follower.write(name,bundle(tmp_path,['follower first']))
+        follower.write(name,bundle(tmp_path,['follower updated']))
+        assert follower.read_recovery(name,4096)['documents'][0]['text']=='follower updated'
+    finally:
+        follower.close()
+
+
+def test_dead_secondary_lease_does_not_block_stale_slot_reuse(store,tmp_path):
+    token='f'*32
+    name=f'recovery-{token}.json'
+    store._write_json(f'lease-{token}.json',
+                      {'pid':-1,'token':token,'primary':False})
+    store.write(name,bundle(tmp_path,['reclaimed archive']))
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='reclaimed archive'
+
+
 def test_unreadable_existing_archive_is_not_silently_overwritten(store,tmp_path):
     name='recovery-'+('a'*32)+'.json'
     corrupt=b'{invalid metadata - preserve for inspection'
