@@ -1,6 +1,6 @@
 # MDBM product specification
 
-Status: Implementation contract for 1.0.0a2. The delivered implementation report records verification limits; it does not override this contract.
+Status: Implementation contract for 1.0.0a3. The delivered implementation report records verification limits; it does not override this contract.
 
 ## Authority and precedence
 
@@ -30,8 +30,34 @@ Filesystem is rooted, expandable and keyboard navigable. Commands support openin
 
 ## Modals and lifecycle
 
+The workspace holds up to 32 open documents with independent editor, preview,
+Contents, undo and tile-memory state. The protected tab strip and Ctrl+B
+document picker activate these authoritative documents; they do not keep
+separate text copies. Picker filtering uses filename and relative-path
+tokens, case-insensitively, and Escape preserves the active document.
+
+Search open documents examines literal, case-sensitive text in the current
+buffers, including dirty and untitled documents. It retains the first 200
+non-overlapping matches in tab/source order, with one-based source-character
+line/column locations. Results are read-only until explicit activation and
+must match the same document object, generation and text slice before
+selection/navigation. Closed or changed documents invalidate old results.
+
+Save All processes dirty documents in tab order through the existing Save,
+Save As and conflict flows. It stops on cancellation or error; successful
+earlier saves remain published. Completion restores the original active
+document. It is a sequence of guarded file saves, not a multi-file atomic
+transaction.
+
 Input dialogs support selection, Home/End, paste, Delete/Backspace and history-free text entry. Destructive dialogs default to Cancel. Dirty navigation/exit offers Save, Discard and Cancel. Save As and conflict confirmations are chained without losing the pending operation. The theme chooser previews on keyboard highlight or deliberate click, commits with Enter or a second activation, and rolls back on Escape. Selected theme and dynamic layout are persisted in session state; hand-edited configuration comments are untouched.
 
 Scripts are sibling `.py` files explicitly named in configuration. The executable itself is excluded. Arguments must be a JSON list of strings. A host confirmation precedes execution; stdout/stderr are captured into a bounded, cancellable, sanitized overlay. Script code is trusted user code and is not a sandbox.
 
 Sessions retain root, active file, theme, layout, focus and tile memories. Recovery snapshots retain unsaved UTF-8 source and the original disk fingerprint. A recovery prompt never writes directly to the source file. State is local, bounded and atomic. Exit and exceptions restore terminal modes through prompt_toolkit. Only a genuine terminal can run the interactive UI; diagnostics and theme validation work non-interactively.
+
+Before starting a new primary session, previous recovery is preserved outside
+the current session's write slot. Deferred snapshots survive Later,
+`--no-restore`, fresh autosnapshots and clean exit. Selective restore/discard
+keeps unselected sibling records. Recovery validates applicable document
+identities, paths, integrity and capacity before mutating the workspace and
+refuses to replace differing current unsaved content.

@@ -1,4 +1,18 @@
-# MDBM 1.0.0a2 — implementation and verification report
+# MDBM implementation and verification report
+
+## Current increment: 1.0.0a3
+
+See [the 3 November 2026 review, implementation plan and verification
+record](IMPROVEMENT_PASS_2026-11-03.md) for the current changes and source-bound
+results. The current suite runs with the declared release dependencies and a
+permanent Linux/Windows CI workflow. Multi-document tabs, terminal path ingress,
+the document picker, open-buffer search and guarded Save All extend the
+original build below.
+
+The remainder of this report preserves the **historical 1.0.0a2 delivery**.
+Its 513-test count, bootstrap-dependency caveat and performance measurements
+describe that environment and date; they are not the current qualification
+record. Native terminal and full product-contract acceptance remain open.
 
 ## Release decision
 

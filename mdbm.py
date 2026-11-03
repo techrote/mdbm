@@ -80,9 +80,33 @@ try:
 except ImportError:
     send2trash = None
 
-VERSION = '1.0.0a2'
+VERSION = '1.0.0a3'
 APP_DIR = Path(__file__).resolve().parent
-DATA_DIR = APP_DIR if (APP_DIR/'themes').is_dir() else Path(sys.prefix)/'share'/'mdbm'
+
+
+def find_data_directory(directory: Path) -> Path:
+    """Find this installation's data in source, target or wheel layouts.
+
+    A user/prefix installation need not put data beneath ``sys.prefix``.
+    Wheel metadata records the installed location; pip's ``--target`` layout
+    is checked directly because its relocated RECORD paths may be stale.
+    """
+    candidates = [directory, directory/'share'/'mdbm']
+    try:
+        distribution = importlib.metadata.distribution('mdbm-workspace')
+        for entry in distribution.files or ():
+            if entry.parts[-3:] == ('share', 'mdbm', 'mdbm.conf'):
+                candidates.append(Path(distribution.locate_file(entry)).parent)
+    except (importlib.metadata.PackageNotFoundError, OSError, ValueError):
+        pass
+    candidates.append(Path(sys.prefix)/'share'/'mdbm')
+    for candidate in candidates:
+        if (candidate/'mdbm.conf').is_file() and (candidate/'themes').is_dir():
+            return candidate.resolve()
+    return candidates[-1]
+
+
+DATA_DIR = find_data_directory(APP_DIR)
 MAX_THEME_BYTES = 1024 * 1024
 MAX_THEME_OBJECTS = 4096
 MAX_STRING_BYTES = 16384
@@ -91,6 +115,7 @@ MAX_DEPTH = 16
 MAX_UNDO_BYTES = 32 * 1024 * 1024
 MAX_UNDO_STEPS = 512
 MAX_OPEN_DOCUMENTS = 32
+MAX_DOCUMENT_MATCHES = 200
 MAX_PREVIEW_ROWS = 300000
 MAX_PARSE_TOKENS = 500000
 NAME_RE = re.compile(r'^[a-z][a-z0-9_.-]{0,63}$')
@@ -1975,7 +2000,7 @@ class DocumentModel:
         if not needle: return False
         pos=self.cursor if start is None else start
         if reverse:
-            found=self.text.rfind(needle,0,max(0,pos-1))
+            found=self.text.rfind(needle,0,max(0,pos))
             if found<0: found=self.text.rfind(needle)
         else:
             found=self.text.find(needle,pos)
@@ -2162,6 +2187,44 @@ def fingerprint_from_json(value: Any) -> Fingerprint | None:
     return Fingerprint(**value)
 
 
+def _windows_process_alive(pid: int) -> bool:
+    """Non-signalling liveness probe; inaccessible/unknown owners remain live."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32=ctypes.WinDLL('kernel32',use_last_error=True)
+        kernel32.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD]
+        kernel32.OpenProcess.restype=wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes=[wintypes.HANDLE,wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype=wintypes.DWORD
+        kernel32.CloseHandle.argtypes=[wintypes.HANDLE]
+        kernel32.CloseHandle.restype=wintypes.BOOL
+        handle=kernel32.OpenProcess(0x00100000,False,pid)  # SYNCHRONIZE only.
+        if not handle:
+            return ctypes.get_last_error()!=87  # ERROR_INVALID_PARAMETER: no such PID.
+        try:
+            # A process handle is signalled only after exit. Zero timeout never
+            # blocks; timeout, failure and unknown results preserve the lock.
+            return kernel32.WaitForSingleObject(handle,0)!=0  # WAIT_OBJECT_0.
+        finally:
+            kernel32.CloseHandle(handle)
+    except (ImportError,AttributeError,OSError):
+        return True
+
+
+def _process_alive(pid: Any) -> bool:
+    if type(pid) is not int or not 1<=pid<=2**31-1: return True
+    if pid==os.getpid(): return True
+    if os.name=='nt':
+        # os.kill(pid,0) sends CTRL_C_EVENT on Windows; it is not a safe probe.
+        return _windows_process_alive(pid)
+    if os.name!='posix': return True
+    try: os.kill(pid,0)
+    except ProcessLookupError: return False
+    except (PermissionError,OSError): pass
+    return True
+
+
 class StateStore:
     """Atomic private JSON, with a conservative advisory single-writer lock."""
     def __init__(self, directory: Path):
@@ -2176,12 +2239,7 @@ class StateStore:
             if lock.exists() and not lock.is_symlink():
                 existing=self.read('lock.json',4096)
                 pid=existing.get('pid') if isinstance(existing,dict) else None
-                alive=True
-                if type(pid) is int and 1<=pid<=2**31-1:
-                    try: os.kill(pid,0)
-                    except ProcessLookupError: alive=False
-                    except (PermissionError,OSError): pass
-                if not alive:
+                if not _process_alive(pid):
                     with contextlib.suppress(OSError): lock.unlink()
             try:
                 fd=os.open(lock,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),0o600)
@@ -2196,6 +2254,18 @@ class StateStore:
     @property
     def recovery_name(self) -> str:
         return 'recovery.json' if self.owns_lock else f'recovery-{self.token}.json'
+
+    def preserve_previous_recovery(self) -> None:
+        """Keep a previous session's snapshot outside this session's write slot."""
+        if not self.enabled or not self.owns_lock: return
+        source=self._path(self.recovery_name)
+        if not source.exists(): return
+        destination=self._path(f'recovery-{uuid.uuid4().hex}.json')
+        try:
+            source.rename(destination)
+            SafeFiles._sync_dir(self.directory)
+        except OSError as exc:
+            raise MDBMError('Cannot preserve previous recovery: '+display_text(exc)) from None
 
     def _path(self, name: str) -> Path:
         if not re.fullmatch(r'[a-z0-9-]+\.json',name): raise MDBMError('Invalid internal state name')
@@ -2302,6 +2372,7 @@ class PreviewLayout:
     source_lines: tuple[int,...]
     source_rows: tuple[int,...]
     anchors: Mapping[str,int]
+    ascii_only: bool = False
 
     def source_to_row(self, line: int) -> int:
         i=max(0,bisect.bisect_right(self.source_lines,line)-1)
@@ -2603,7 +2674,7 @@ def make_preview_layout(parsed: ParsedMarkdown, width: int, ascii_only: bool = F
         rows[-1]=replace(final,spans=warning)
     sorted_sources=sorted(source)
     return PreviewLayout(parsed.generation,width,tuple(rows),tuple(sorted_sources),
-                          tuple(source[s] for s in sorted_sources),MappingProxyType(anchors))
+                          tuple(source[s] for s in sorted_sources),MappingProxyType(anchors),ascii_only)
 
 
 def parse_and_layout(text: str, generation: int, width: int, ascii_only: bool) -> tuple[ParsedMarkdown,PreviewLayout]:
@@ -2780,6 +2851,7 @@ class Overlay:
     field_scroll: int = 0
     input_y: int = 0
     list_y: int = 0
+    refresh: Callable[[Overlay],None] | None = None
 
 
 @dataclass(slots=True)
@@ -2804,6 +2876,8 @@ class PreviewWorker:
     The four-argument request/poll form remains supported for callers that use
     PreviewWorker directly. Workspace uses the five-argument document-aware
     form so a result can never be accepted by a different active document.
+    Pending requests and unpolled results may be replaced. A request is not a
+    completion guarantee; document activation must recheck its cached preview.
     """
     def __init__(self):
         import threading
@@ -2899,6 +2973,7 @@ Ctrl+N  New buffer             Ctrl+O  Open file
 Ctrl+S  Save                   F4       Save as
 F9      Arm next path drop    Ctrl+Q   Guarded quit
 Ctrl+P  Command palette        Ctrl+T   Restore all tiles
+Ctrl+B  Switch document
 F10     Activate ribbon
 Tab / Shift+Tab               Next / previous visible tile
 Alt+1 / Alt+2 / Alt+3 / Alt+4  Filesystem / Contents / Edit / View
@@ -2921,6 +2996,14 @@ Ctrl+G go to line and optional column. Insert a literal Tab with the command pal
 Ctrl+I is indistinguishable from Tab in standard terminals.
 
 Documents: use Ctrl+P → Next document / Previous document / Close document.
+Ctrl+B opens a filterable document list; * marks unsaved changes.
+Navigate → Search open documents searches literal, case-sensitive text in
+all open buffers, including unsaved edits. Enter reveals a match in Edit;
+results show source line:column and stop after 200 matches.
+File → Save all changed documents saves in tab order. Save As and disk
+conflicts keep their usual guards. Cancelling or failing a save stops the
+batch; earlier successful saves remain saved. Completion restores the
+original active document. These commands are also in Ctrl+P.
 Ctrl+Tab and Ctrl+Shift+Tab are intentionally not bound: standard terminal
 input does not portably distinguish Ctrl+Tab from Tab across supported hosts.
 
@@ -2951,6 +3034,7 @@ class Workspace:
         self.config=config or load_config()
         self.diagnostics=list(self.config.diagnostics)
         self.store=StateStore(self.config.path('application','state_directory')) if persist else None
+        if self.store: self.store.preserve_previous_recovery()
         saved=self.store.read('session.json') if self.store and restore and self.config.get('session','restore') else None
         if self.store: self.diagnostics.extend(self.store.diagnostics)
         if not isinstance(saved,dict) or saved.get('schema') not in ('mdbm-session/1.0','mdbm-session/2.0'): saved={}
@@ -3202,7 +3286,9 @@ class Workspace:
     def persist_recovery(self) -> None:
         if not self.store: return
         record=self.recovery_data()
-        signature=json.dumps(record,sort_keys=True) if record is not None else ''
+        # Publication time is metadata, not a change to recoverable state.
+        # Including it would rewrite every dirty document on every timer tick.
+        signature=json.dumps({k:v for k,v in record.items() if k!='timestamp'},sort_keys=True) if record is not None else ''
         if signature==self._recovery_signature: return
         if record is None: self.store.clear_recovery()
         else: self.store.write(self.store.recovery_name,record)
@@ -3221,17 +3307,37 @@ class Workspace:
                 def restore_bundle(r: dict[str,Any]=record,n: str=name,a: Path | None=active) -> None:
                     try:
                         self.restore_recovery_bundle(r,a)
+                        # A file-specific launch restores only that file. Save
+                        # the remaining documents before publishing this
+                        # session's snapshot or consuming the original bundle.
+                        remaining=[item for item in r['documents']
+                                   if a is not None and isinstance(item,dict) and item.get('path')!=str(a)]
+                        if remaining and self.store.owns_lock:
+                            remainder=dict(r,documents=remaining)
+                            self.store.write(f'recovery-{uuid.uuid4().hex}.json',remainder)
                         self.persist_recovery()
-                        if n!=self.store.recovery_name:
+                        if self.store.owns_lock and n!=self.store.recovery_name:
                             with contextlib.suppress(OSError,MDBMError): self.store._path(n).unlink()
                     except (MDBMError,UnicodeError,ValueError) as exc:
                         self.info('Recovery rejected',display_text(exc))
-                def discard_bundle(n: str=name) -> None:
-                    with contextlib.suppress(OSError,MDBMError): self.store._path(n).unlink()
-                count=sum(1 for item in docs if isinstance(item,dict))
+                def discard_bundle(r: dict[str,Any]=record,n: str=name,a: Path | None=active) -> None:
+                    if self.store.owns_lock:
+                        remaining=[item for item in r['documents']
+                                   if a is not None and isinstance(item,dict) and item.get('path')!=str(a)]
+                        if remaining: self.store.write(n,dict(r,documents=remaining))
+                        else:
+                            with contextlib.suppress(OSError,MDBMError): self.store._path(n).unlink()
+                    else: self.status('Snapshot retained: another instance owns session state.')
+                count=sum(1 for item in docs if isinstance(item,dict) and
+                          (active is None or item.get('path')==str(active)))
+                remaining_count=len(docs)-count
+                message=f'Recover unsaved text for {count} document(s)? Source files will not be overwritten.'
+                if remaining_count: message+=f' {remaining_count} other document(s) remain saved for later.'
                 self.confirm('Unsaved recovery found',
-                             f'Recover unsaved text for {count} document(s)? Source files will not be overwritten.',
-                             [('Restore',restore_bundle),('Discard snapshot',discard_bundle),('Later',None)],default=2)
+                             message,
+                             [('Restore',restore_bundle),
+                              ('Discard selected' if remaining_count else 'Discard snapshot',discard_bundle),
+                              ('Later',None)],default=2)
                 break
             if schema!='mdbm-recovery/1.0': continue
             if active is not None and record.get('path')!=str(active): continue
@@ -3240,11 +3346,13 @@ class Workspace:
                 try:
                     self.restore_recovery(r)
                     self.persist_recovery()
-                    if n!=self.store.recovery_name:
+                    if self.store.owns_lock and n!=self.store.recovery_name:
                         with contextlib.suppress(OSError,MDBMError): self.store._path(n).unlink()
                 except (MDBMError,UnicodeError,ValueError) as exc: self.info('Recovery rejected',display_text(exc))
             def discard(n: str=name) -> None:
-                with contextlib.suppress(OSError,MDBMError): self.store._path(n).unlink()
+                if self.store.owns_lock:
+                    with contextlib.suppress(OSError,MDBMError): self.store._path(n).unlink()
+                else: self.status('Snapshot retained: another instance owns session state.')
             self.confirm('Unsaved recovery found',
                          'Recover the unsaved text for '+display_text(record.get('path') or 'an untitled buffer')+'? The source file will not be overwritten.',
                          [('Restore',restore_record),('Discard snapshot',discard),('Later',None)],default=2)
@@ -3283,13 +3391,23 @@ class Workspace:
         records=record.get('documents')
         if not isinstance(records,list) or not records or len(records)>MAX_OPEN_DOCUMENTS:
             raise MDBMError('Recovery document set is invalid.')
-        restored: list[OpenDocumentState]=[]
+        # Validate the complete candidate and its capacity before changing any
+        # live document. A corrupt later record must not half-restore a bundle.
+        plans: list[tuple[OpenDocumentState,DocumentModel,Mapping[str,Any],bool]]=[]
+        seen_paths:set[str]=set(); seen_ids:set[str]=set()
         for item in records:
             if not isinstance(item,dict): raise MDBMError('Recovery document record is invalid.')
             doc=self._document_from_recovery(item)
+            ident=item.get('document_id')
+            if isinstance(ident,str):
+                if ident in seen_ids: raise MDBMError('Recovery contains a duplicate document identity.')
+                seen_ids.add(ident)
+            if doc.path is not None:
+                key=self._path_key(doc.path)
+                if key in seen_paths: raise MDBMError('Recovery contains a duplicate document path.')
+                seen_paths.add(key)
             if only_path is not None and (doc.path is None or self._path_key(doc.path)!=self._path_key(only_path)):
                 continue
-            ident=item.get('document_id')
             by_path=self._state_by_path(doc.path) if doc.path is not None else None
             by_id=self._state_by_id(ident) if isinstance(ident,str) else None
             target=by_path
@@ -3298,19 +3416,33 @@ class Workspace:
                     by_id.doc.path is not None and doc.path is not None and
                     self._path_key(by_id.doc.path)==self._path_key(doc.path))
                 if same_path: target=by_id
+            is_new=target is None
             if target is None:
-                if len(self.documents)>=MAX_OPEN_DOCUMENTS: raise MDBMError('Recovery exceeds the open-document limit.')
-                target=self._make_document_state(doc,ident if isinstance(ident,str) else None,item)
-                self.documents.append(target)
-            else:
-                target.doc=doc; target.parsed=None; target.preview=None; target.requested_parse=None
-                target.selected_link=-1; target.view_links=[]
-                self._restore_document_state_record(target,item)
-            restored.append(target)
-        if not restored: raise MDBMError('Recovery contains no document applicable to this launch.')
+                # Recovery record IDs select existing buffers and the preferred
+                # active record; a newly introduced live buffer needs a fresh
+                # ID so a closed buffer's in-flight preview cannot be revived.
+                target=self._make_document_state(doc,record=item)
+            elif target.doc.dirty and target.doc.text!=doc.text:
+                raise MDBMError('Recovery would replace current unsaved changes; save or close that document first.')
+            plans.append((target,doc,item,is_new))
+        if not plans: raise MDBMError('Recovery contains no document applicable to this launch.')
+        if len(self.documents)+sum(is_new for _,_,_,is_new in plans)>MAX_OPEN_DOCUMENTS:
+            raise MDBMError('Recovery exceeds the open-document limit.')
+        self._sync_active_state()
+        for target,doc,item,is_new in plans:
+            # Replacing the model must invalidate outstanding work even when
+            # the stable live document ID and layout width are unchanged.
+            if not is_new: doc.generation=target.doc.generation+1
+            target.doc=doc; target.parsed=None; target.preview=None; target.requested_parse=None
+            target.selected_link=-1; target.view_links=[]
+            self._restore_document_state_record(target,item)
+            if is_new: self.documents.append(target)
         preferred=record.get('active_document')
-        target=self._state_by_id(preferred) if isinstance(preferred,str) and any(x.id==preferred for x in restored) else restored[-1]
-        self.activate_document(target.id)
+        target=next((state for state,_,item,_ in plans if item.get('document_id')==preferred),plans[-1][0])
+        # activate_document deliberately does nothing for the current ID, and
+        # switching through it would sync the obsolete active object back into
+        # the restored state. Bind the newly restored object directly instead.
+        self._bind_document_state(target)
         self.status('Recovery restored in memory; Save still checks each document disk fingerprint.')
 
     def invalidate(self) -> None:
@@ -3370,7 +3502,14 @@ class Workspace:
             self.preview=make_preview_layout(self.parsed,self.preview_width,self.config.ascii)
         else:
             self.parsed=state.parsed; self.preview=state.preview
-        self.requested_parse=state.requested_parse
+        # A different document may have replaced this document's pending job
+        # or its unpolled result in the worker's bounded slots. Only a completed
+        # cache can survive activation as proof that no request is needed.
+        self.requested_parse=((self.doc.generation,self.preview_width)
+            if (self.preview.generation==self.doc.generation and self.preview.width==self.preview_width
+                and self.preview.ascii_only==self.config.ascii)
+            else None)
+        state.requested_parse=self.requested_parse
         self._selected_link=state.selected_link; self._view_links=list(state.view_links)
         if hasattr(self,'_dirty_known'): self._dirty_known=self.doc.dirty
         if emit:
@@ -3392,6 +3531,76 @@ class Workspace:
         self.activate_document(target.id)
         label=dict(self.document_tab_labels()).get(target.id,'document')
         self.status('Active document · '+display_text(label,self.config.ascii))
+
+    def choose_document(self) -> None:
+        """Filter the authoritative open-document set without changing buffers."""
+        while self.overlays: self.close_overlay()
+        if self.capture: self.cancel_capture()
+        query=DocumentModel(); query.max_chars=256
+        overlay=Overlay('picker','Switch document',editor=query,
+                        message='Filter by name or path · * unsaved · Enter opens · Esc cancels',
+                        refresh=self.document_picker_items)
+        self.document_picker_items(overlay)
+        overlay.index=next((i for i,item in enumerate(overlay.items)
+                            if item.payload==self.active_document_id),0)
+        self.push_overlay(overlay)
+
+    def document_picker_items(self, overlay: Overlay) -> None:
+        tokens=(overlay.editor.text.casefold() if overlay.editor else '').split()
+        labels=dict(self.document_tab_labels()); items=[]
+        for state in self.documents:
+            label=labels[state.id]
+            path=str(state.doc.path.relative_to(self.files.root)) if state.doc.path else label
+            if all(token in (label+' '+path).casefold() for token in tokens):
+                marker='* ' if state.doc.dirty else '  '
+                items.append(MenuItem(marker+path,'document.activate',state.id))
+        overlay.items=items or [MenuItem('No open documents match',enabled=False)]
+        overlay.index=max(0,min(len(overlay.items)-1,overlay.index)); overlay.scroll=0
+
+    def search_documents(self, needle: str) -> None:
+        """Search current in-memory text; retain only a bounded result snapshot."""
+        if not needle:
+            self.status('Enter text to search across open documents.'); return
+        self.document_search_term=needle
+        self._sync_active_state()
+        labels=dict(self.document_tab_labels()); items=[]; truncated=False
+        for state in self.documents:
+            doc=state.doc; position=0
+            while True:
+                start=doc.text.find(needle,position)
+                if start<0: break
+                if len(items)>=MAX_DOCUMENT_MATCHES:
+                    truncated=True; break
+                end=start+len(needle); row=doc.row_of(start)
+                line_start=doc.line_start(row)
+                line_end=doc.line_start(row+1)-1 if row+1<doc.line_count else len(doc.text)
+                left=max(line_start,start-24); right=min(line_end,start+96)
+                excerpt=('…' if left>line_start else '')+doc.text[left:right]+('…' if right<line_end else '')
+                label=f'{labels[state.id]}:{row+1}:{start-line_start+1}  '+display_text(excerpt,self.config.ascii)
+                # Model identity closes the generation-reuse hole when recovery
+                # replaces an existing buffer while this result list is open.
+                payload=(state.id,doc,doc.generation,start,end,needle)
+                items.append(MenuItem(label,'document.search_result',payload))
+                position=end
+            if truncated: break
+        if not items:
+            items=[MenuItem('No matches in open documents',enabled=False)]
+        count=sum(item.enabled for item in items)
+        title=f'Search open documents · {count}{"+" if truncated else ""} matches'
+        message=('First '+str(MAX_DOCUMENT_MATCHES)+' matches · ' if truncated else '')+'Case-sensitive literal text · Enter reveals · Esc cancels'
+        self.push_overlay(Overlay('picker',title,items=items,message=message))
+
+    def reveal_document_match(self, payload: Any) -> None:
+        document_id,doc,generation,start,end,needle=payload
+        state=self._state_by_id(document_id)
+        if (state is None or state.doc is not doc or doc.generation!=generation
+                or doc.text[start:end]!=needle):
+            self.status('Search results changed · search open documents again.',True); return
+        self.activate_document(document_id)
+        self.doc.anchor=start; self.doc.cursor=end
+        self.search_term=needle
+        self.set_layout('focus',Tile.EDIT); self.ensure_caret_visible()
+        self.status('Found in '+dict(self.document_tab_labels())[document_id])
 
     def document_tab_labels(self) -> list[tuple[str,str]]:
         """Derive readable labels from authoritative document paths and order."""
@@ -3561,6 +3770,29 @@ class Workspace:
         else:
             self.perform_save(doc.path,doc.fingerprint,after,document_id)
 
+    def save_all(self) -> None:
+        """Save in tab order through the normal Save As and conflict guards.
+
+        A cancelled dialog or failed save stops the chain. Earlier successful
+        saves remain published; no rollback or implicit overwrite is attempted.
+        """
+        self._sync_active_state()
+        pending=[state.id for state in self.documents if state.doc.dirty]
+        if not pending:
+            self.status('All documents are already saved.'); return
+        original=self.active_document_id; total=len(pending)
+        def advance(index: int) -> None:
+            while index<len(pending):
+                state=self._state_by_id(pending[index])
+                if state is not None and state.doc.dirty: break
+                index+=1
+            if index==len(pending):
+                if self._state_by_id(original) is not None: self.activate_document(original)
+                self.status(f'Saved all {total} changed documents.'); return
+            self.activate_document(pending[index])
+            self.save(after=lambda:advance(index+1))
+        advance(0)
+
     def perform_save(self, path: Path, expected: Fingerprint | None,
                      after: Callable[[],None] | None = None, document_id: str | None = None) -> None:
         state=self._state_by_id(document_id or self.active_document_id)
@@ -3715,13 +3947,37 @@ class Workspace:
         memory.scroll=max(0,min(memory.scroll,self.doc.line_count-1))
         self.memories[Tile.VIEW].scroll=self.preview.source_to_row(row) if self.preview.generation==self.doc.generation else self.memories[Tile.VIEW].scroll
 
-    def accept_preview(self, generation: int, width: int, result: Any) -> bool:
-        if generation!=self.doc.generation or width!=self.preview_width: return False
-        if isinstance(result,str): self.status('Preview failed: '+result,True); return False
-        self.parsed,self.preview=result
-        self._view_links=[]; self._selected_link=-1
-        self.memories[Tile.VIEW].scroll=min(self.memories[Tile.VIEW].scroll,max(0,len(self.preview.rows)-1))
-        self.invalidate(); return True
+    def accept_preview(self, generation: int, width: int, result: Any,
+                       document_id: str | None = None) -> bool:
+        state=self._state_by_id(document_id or self.active_document_id)
+        if state is None or generation!=state.doc.generation: return False
+        active=state.id==self.active_document_id
+        if active:
+            if width!=self.preview_width: return False
+        elif state.requested_parse!=(generation,width):
+            return False
+        if isinstance(result,str):
+            if active: self.status('Preview failed: '+result,True)
+            else: state.requested_parse=None
+            return False
+        parsed,preview=result
+        if (parsed.generation!=generation or preview.generation!=generation or preview.width!=width
+            or preview.ascii_only!=self.config.ascii):
+            return False
+        if active:
+            self.parsed,self.preview=parsed,preview
+            self.requested_parse=(generation,width)
+            self._view_links=[]; self._selected_link=-1
+            self.memories[Tile.VIEW].scroll=min(self.memories[Tile.VIEW].scroll,max(0,len(preview.rows)-1))
+            self.invalidate()
+        else:
+            # Keep a completed inactive document useful without publishing its
+            # source map, links or headings into the current document.
+            state.parsed,state.preview=parsed,preview
+            state.view_links=[]; state.selected_link=-1
+            memory=state.memories[Tile.VIEW]
+            memory.scroll=min(memory.scroll,max(0,len(preview.rows)-1))
+        return True
 
     def parse_sync(self, width: int | None = None) -> None:
         self.preview_width=max(1,width or self.preview_width)
@@ -3737,6 +3993,7 @@ class Workspace:
         r.add('file.open','Open file…',lambda p:self.request_text('Open file','',self.open_path,'UTF-8 path relative to this workspace.'),['c-o'],'File')
         r.add('file.arm_drop','Arm next file-path paste',lambda p:self.arm_path_paste(),['f9'],'File')
         r.add('file.save','Save',lambda p:self.save(),['c-s'],'File')
+        r.add('file.save_all','Save all changed documents',lambda p:self.save_all(),[],'File')
         r.add('file.save_as','Save As…',lambda p:self.save(True),['f4'],'File')
         # Compatibility alias retained for existing configs; MDBM-002 exposes
         # document.* as the stable navigation command namespace.
@@ -3744,6 +4001,12 @@ class Workspace:
         r.add('document.close','Close document',lambda p:self.close_document(str(p) if p else None),[],'File')
         r.add('document.next','Next document',lambda p:self.cycle_document(1),[],'Navigate')
         r.add('document.previous','Previous document',lambda p:self.cycle_document(-1),[],'Navigate')
+        r.add('document.switch','Switch document…',lambda p:self.choose_document(),['c-b'],'Navigate')
+        r.add('document.search','Search open documents…',lambda p:self.request_text(
+            'Search open documents',getattr(self,'document_search_term',''),self.search_documents,
+            'Case-sensitive literal text in all open buffers, including unsaved edits. Up to 200 results.'),[],'Navigate')
+        r.add('document.search_result','Reveal search result',lambda p:self.reveal_document_match(p),[],
+              'Navigate','Search open documents → Enter',False)
         r.add('document.activate','Activate document',lambda p:self.activate_document(str(p)),[],'Navigate','Tab strip click',False)
         r.add('file.root','Change workspace root…',lambda p:self.request_text('Workspace root',str(self.files.root),lambda v:self.change_root(Path(v).expanduser())),[],'File')
         r.add('file.mkdir','New directory…',lambda p:self.request_text('New directory','new-folder',lambda v:(self.files.mkdir(v),self.refresh_tree())),[],'File')
@@ -4082,7 +4345,7 @@ class Workspace:
             suffix='  '+command.keys[0] if command.keys else ''
             return MenuItem(label or command.label+suffix,cid)
         if name=='File':
-            return [item(cid) for cid in ('file.new','file.open','file.arm_drop','file.save','file.save_as','document.close','file.mkdir','file.rename','file.trash','file.root','file.quit')]
+            return [item(cid) for cid in ('file.new','file.open','file.arm_drop','file.save','file.save_all','file.save_as','document.close','file.mkdir','file.rename','file.trash','file.root','file.quit')]
         if name=='Edit':
             return [item(cid) for cid in ('edit.undo','edit.redo','edit.copy','edit.cut','edit.paste','edit.select_all','edit.find','edit.replace','edit.insert_tab','edit.profile')]
         if name=='Tile':
@@ -4091,7 +4354,7 @@ class Workspace:
                     MenuItem('Visibility',children=tuple(item(cid) for cid in ('tile.toggle_left','tile.toggle_right','tile.toggle_edit','tile.toggle_view'))),
                     MenuItem('Resize',children=tuple(item(cid) for cid in ('layout.narrow_left','layout.widen_left','layout.shrink_view','layout.grow_view'))),item('tile.restore')]
         if name=='Navigate':
-            return [item(cid) for cid in ('document.previous','document.next','edit.goto','edit.find_next','edit.find_previous','navigate.contents_filter','navigate.refresh','navigate.previous_link','navigate.next_link','navigate.follow_link')]
+            return [item(cid) for cid in ('document.switch','document.search','document.previous','document.next','edit.goto','edit.find_next','edit.find_previous','navigate.contents_filter','navigate.refresh','navigate.previous_link','navigate.next_link','navigate.follow_link')]
         if name=='Theme':
             return [item(cid) for cid in ('theme.choose','theme.minimal','theme.motion','theme.immersive','theme.high_contrast','theme.ascii')]
         if name=='Scripts':
@@ -4183,12 +4446,14 @@ class Workspace:
             self.set_theme(item.payload); self.close_overlay(False); self.persist_session(); self.status('Theme applied: '+self.theme.name); return
         if overlay.kind=='palette':
             self.close_overlay(False); self.dispatch(item.payload); return
+        if overlay.kind=='picker':
+            self.close_overlay(False); self.dispatch(item.command,item.payload); return
         self.close_menus(); self.dispatch(item.command,item.payload)
 
     def overlay_accept(self) -> None:
         if not self.overlays: return
         overlay=self.overlays[-1]
-        if overlay.kind in ('menu','palette','theme'): self.activate_overlay_item(overlay)
+        if overlay.kind in ('menu','palette','theme','picker'): self.activate_overlay_item(overlay)
         elif overlay.kind=='confirm': self.overlay_action({'row':overlay.index})
         elif overlay.kind=='input':
             value=overlay.editor.text if overlay.editor else ''
@@ -4490,7 +4755,9 @@ class Workspace:
             self.dispatch(command); return
         if self.capture and command!='input.escape': self.cancel_capture()
         if self.overlays:
-            self.overlay_key(key,command); self.invalidate(); return
+            try: self.overlay_key(key,command)
+            except (MDBMError,OSError,ValueError) as exc: self.status(str(exc),True)
+            self.invalidate(); return
         if self.config.get('input','profile')=='vim' and self.layout.focus==Tile.EDIT:
             if key=='c-r': self.dispatch('edit.redo'); return
             if command=='input.enter' and self.vim_mode!='insert':
@@ -4501,7 +4768,7 @@ class Workspace:
         overlay=self.overlays[-1]
         if command=='input.escape': self.escape(); return
         if command=='input.enter': self.overlay_accept(); return
-        if overlay.kind in ('menu','theme','palette'):
+        if overlay.kind in ('menu','theme','palette','picker'):
             if key in ('up','down','pageup','pagedown') and overlay.items:
                 delta={'up':-1,'down':1,'pageup':-8,'pagedown':8}[key]
                 overlay.index=(overlay.index+delta)%len(overlay.items)
@@ -4543,6 +4810,7 @@ class Workspace:
             elif key=='c-z': doc.undo()
             elif key=='c-y': doc.redo()
             if overlay.kind=='palette': overlay.index=0; self.palette_items(overlay)
+            elif overlay.refresh: overlay.index=0; overlay.refresh(overlay)
 
     def arm_path_paste(self) -> None:
         """Opt in once; ordinary Edit paste never opens files implicitly."""
@@ -4598,8 +4866,11 @@ class Workspace:
         if self.overlays:
             overlay=self.overlays[-1]
             if overlay.editor:
-                overlay.editor.insert(clean_paste(text).replace('\r',' ').replace('\n',' ')[:16384])
+                try: overlay.editor.insert(clean_paste(text).replace('\r',' ').replace('\n',' ')[:16384])
+                except MDBMError as exc:
+                    self.status(str(exc),True); return
                 if overlay.kind=='palette': overlay.index=0; self.palette_items(overlay)
+                elif overlay.refresh: overlay.index=0; overlay.refresh(overlay)
             elif not paste and overlay.kind=='menu':
                 matches=[i for i,item in enumerate(overlay.items) if item.enabled and item.label.casefold().startswith(text.casefold())]
                 if matches:
@@ -4629,9 +4900,12 @@ class Workspace:
                     if rows[i][0].name.casefold().startswith(text.casefold()): memory.row=i; self.ensure_row_visible(Tile.FILESYSTEM,len(rows)); break
             self.invalidate(); return
         before=self.doc.generation
-        if self.config.get('input','profile')=='vim' and self.vim_mode!='insert' and not paste:
-            self.vim_text(text)
-        else: self.doc.insert(text)
+        try:
+            if self.config.get('input','profile')=='vim' and self.vim_mode!='insert' and not paste:
+                self.vim_text(text)
+            else: self.doc.insert(text)
+        except MDBMError as exc:
+            self.status(str(exc),True); return
         if self.doc.generation!=before:
             self.requested_parse=None
             if self._dirty_known!=self.doc.dirty: self.emit('dirty-change'); self._dirty_known=self.doc.dirty
@@ -4959,7 +5233,7 @@ class Workspace:
         if overlay.kind=='menu':
             w=min(width,max(8,min(58,max((width_of(i.label)+4 for i in overlay.items),default=16))))
             h=min(available_h,len(overlay.items)+2)
-        elif overlay.kind in ('theme','palette'):
+        elif overlay.kind in ('theme','palette','picker'):
             w=min(width,76); h=min(available_h,max(6,min(22,len(overlay.items)+5)))
         elif overlay.kind=='confirm':
             w=min(width,76)
@@ -4986,13 +5260,15 @@ class Workspace:
         overlay.list_y=inner.y
         if overlay.kind=='menu':
             self.paint_overlay_items(canvas,overlay,inner,plane)
-        elif overlay.kind in ('palette','theme'):
+        elif overlay.kind in ('palette','theme','picker'):
             if overlay.editor:
                 overlay.input_y=inner.y
                 self.paint_field(canvas,overlay,Rect(inner.x,inner.y,inner.w,1),plane)
                 overlay.list_y=inner.y+2
+                if overlay.message and inner.h>1:
+                    canvas.text(inner.x,inner.y+1,overlay.message,HOST_DIALOG,plane,Rect(inner.x,inner.y+1,inner.w,1),self.config.ascii)
             else:
-                canvas.text(inner.x,inner.y,'Preview: arrows · commit: Enter · cancel: Esc',HOST_DIALOG,plane,inner,self.config.ascii)
+                canvas.text(inner.x,inner.y,overlay.message or 'Preview: arrows · commit: Enter · cancel: Esc',HOST_DIALOG,plane,inner,self.config.ascii)
                 overlay.list_y=inner.y+2
             self.paint_overlay_items(canvas,overlay,Rect(inner.x,overlay.list_y,inner.w,max(0,inner.bottom-overlay.list_y)),plane)
         elif overlay.kind=='input':
@@ -5091,7 +5367,7 @@ class Workspace:
             if result:
                 if len(result)==4:
                     document_id,generation,width,payload=result
-                    if document_id==self.active_document_id and self.accept_preview(generation,width,payload):
+                    if self.accept_preview(generation,width,payload,document_id):
                         self.invalidate()
                 else:
                     generation,width,payload=result

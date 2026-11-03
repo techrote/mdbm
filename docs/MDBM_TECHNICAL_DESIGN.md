@@ -22,12 +22,29 @@ A frame's hit map is rebuilt from final rectangles and includes z-order. Overlay
 
 ## Background work
 
-A single worker handles parsing and preview layout. Debounce and generation/width tags prevent stale publication. A changed document replaces the pending request instead of accumulating jobs. Only immutable text snapshots cross the worker boundary; themes never see them. Preview rows carry source ranges and optional safe-link metadata. Heading navigation and edit-to-view reveal use source maps.
+A single worker handles parsing and preview layout. Debounce and document
+identity, generation, width and ASCII-layout policy prevent stale publication.
+A changed document replaces the pending request instead of accumulating jobs.
+An old request marker is not proof of completion: activation reuses a matching
+completed preview or resubmits missing work. Inactive results populate only
+their owning document's cache. Recovery must invalidate earlier model
+generations before a pending worker can publish into a replacement buffer.
+Only immutable text snapshots cross the worker boundary; themes never see
+them. Preview rows carry source ranges and optional safe-link metadata.
+Heading navigation and edit-to-view reveal use source maps.
 
 A host animation tick is bounded by configuration and capability/accessibility policy. Spatial/shape tracks may sample at the bounded theme cadence, while style/palette/visibility tracks use the stricter anti-flash transition cap. Script subprocesses use asyncio streams with output truncation and explicit cancellation. Recovery writes are atomic and scheduled after idle edits; save and dirty guards run in the controller so state cannot report saved before disk publication succeeds.
 
 ## Persistence
 
 `mdbm.conf` is read-only during normal operation. Dynamic settings live in `.mdbm/session.json`, recovery in a separate bounded snapshot. File publication uses same-directory temporaries, flush/fsync and replace, with exclusive creation for new paths. Original content fingerprints detect conflicts. Restored source retains its original fingerprint. Serialized fields are individually validated before application.
+
+Session/recovery schema 2.0 stores the open-document set; schema 1.0 remains
+readable. A new primary owner archives the old recovery slot before any fresh
+write. Scoped restore persists residual records before consuming the source
+bundle. Recovery signatures exclude the publication timestamp so unchanged
+state is not rewritten. The Windows advisory-lock liveness probe opens a
+SYNCHRONIZE-only process handle and uses a zero-time wait; it never uses
+`os.kill(pid, 0)`. Unknown owners retain their lock.
 
 The CLI supports path, config, theme, safe-theme, validate-theme, no-restore and diagnostics. Additional deterministic snapshot and benchmark hooks are development-only CLI conveniences documented in README. Dependency failures print a sanitized installation hint outside full-screen mode. UI exceptions unwind the prompt_toolkit application and attempt recovery without printing raw untrusted terminal data.

@@ -120,3 +120,14 @@ def test_move_to_snaps_inside_cluster():
     doc=m.DocumentModel('Ae\u0301B\n界')
     doc.move_to(2);assert doc.cursor==1
     doc.move_to(3);assert doc.cursor==3
+
+
+@pytest.mark.parametrize('needle,text', [('a','aaa'),('word','wordwordword'),('界','界界界')])
+def test_previous_find_includes_adjacent_match_and_wraps(needle,text):
+    doc=m.DocumentModel(text)
+    assert doc.find(needle) and doc.selection==(0,len(needle))
+    assert doc.find(needle) and doc.selection==(len(needle),2*len(needle))
+    assert doc.find(needle,reverse=True,start=doc.selection[0])
+    assert doc.selection==(0,len(needle))
+    assert doc.find(needle,reverse=True,start=doc.selection[0])
+    assert doc.selection==(2*len(needle),3*len(needle))

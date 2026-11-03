@@ -1,12 +1,31 @@
 # Test and acceptance plan
 
-Status: contract; `IMPLEMENTATION_REPORT.md` lists tests actually run.
+Status: contract; `IMPROVEMENT_PASS_2026-11-03.md` lists current verification,
+and `IMPLEMENTATION_REPORT.md` retains the original measurements.
 
 Run `python -m pytest -q`. Tests cover strict theme/config validation, hostile Unicode, bounds, inheritance/reference cycles, RLE expansion, all patterns, masks and layer modes; document edit deltas and grapheme navigation; source mapping; atomic save, conflict and symlink guards; recovery; geometry; command parity; pointer capture/rollback; overlay click-through; theme preview rollback; and safe script arguments/cancellation.
 
 Deterministic randomized tests mutate nested TOML-like objects, strings, geometry, visibility/order combinations and edit sequences. They use seeded standard-library randomness so they remain runnable without a property-testing framework. Golden cell hashes cover 40×12, 80×24, 120×40 and 200×60 with three reference themes, colour-depth modes, ASCII/Unicode, reduced motion and immersion. Snapshots are cell buffers, not screenshots of an unrelated mock-up.
 
 PTY acceptance launches the actual application in an alternate screen, sends real keys and mouse reports, edits/saves a file, tests dirty-exit cancellation and verifies exit status plus restored terminal echo. The POSIX PTY tests are skipped on Windows; they can run on macOS but do not establish native Terminal.app or iTerm2 behavior. A separate platform matrix is recorded in the release report.
+
+PTY visible-text assertions use a reconstructed VT screen because a physical
+diff may skip characters already present on screen. Raw EOF and terminal-mode
+cleanup assertions remain separate. The multi-document journey covers Ctrl+B,
+searching another open buffer, Save All, and exact saved file contents.
+
+Recovery regressions use actual persisted-session startup and explicit-file
+startup, Later/Discard/Restore, sibling retention, current dirty conflicts,
+invalid later records, capacity and identity collisions. Worker regressions
+control pending requests and completion order, including inactive results,
+overwritten slots, document replacement and ASCII-policy changes. State-lock
+tests use a real live child PID and its subsequent exit on Linux and Windows.
+
+Permanent CI runs Ubuntu Python 3.11/3.13 and Windows Python 3.13 without
+filtering the Windows suite. Every job verifies release Markdown plugins and
+installs the built wheel into fresh target and prefix directories outside the
+source tree, then compiles all packaged themes and exercises the console entry
+point. Only platform-specific PTY tests are skipped on Windows.
 
 Performance probes report distributions at 160×50, not a single best sample. Measure composition and end-to-end terminal latency separately: a fast composition result does not establish p95 input-to-frame <50 ms. Exercise a 100000-line source, bounded undo, preview work queue and script output. Verify unchanged frames have zero logical damage and local caret changes do not force an application-wide terminal clear.
 

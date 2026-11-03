@@ -2,7 +2,12 @@
 
 **A cell-native Markdown reader/editor for the terminal.**
 
-Version **1.0.0a2** is a runnable implementation alpha, not a declaration that every acceptance gate in the supplied plan has passed. The application has one runtime Python source, `mdbm.py`. Themes are validated TOML data; they cannot execute code or operate the editor.
+Version **1.0.0a3** is a runnable implementation alpha, not a declaration that every acceptance gate in the supplied plan has passed. The application has one runtime Python source, `mdbm.py`. Themes are validated TOML data; they cannot execute code or operate the editor.
+
+The [November 2026 improvement pass](docs/IMPROVEMENT_PASS_2026-11-03.md)
+adds a searchable document switcher, search across open buffers, and guarded
+Save All. It also repairs multi-document recovery, preview handoffs,
+Windows state-lock probing, installed theme discovery, and ongoing CI.
 
 ![Actual composed cells: Neon Circuitry](docs/screenshots/neon-circuitry.png)
 
@@ -45,6 +50,7 @@ Drag either one-cell divider with the left or right mouse button. Release commit
 | Command palette / emergency route | **Ctrl+P** |
 | Restore all tiles | **Ctrl+T** |
 | Open / new / save / Save As | **Ctrl+O / Ctrl+N / Ctrl+S / F4** |
+| Switch document, filtering by name or path | **Ctrl+B** |
 | Quit, with dirty-state guard | **Ctrl+Q** |
 | Focus next / previous tile | **Tab / Shift+Tab** |
 | Direct tile focus | **Alt+1 … Alt+4** |
@@ -58,6 +64,29 @@ Drag either one-cell divider with the left or right mouse button. Release commit
 The palette exposes commands without dedicated shortcuts, including keyboard split resizing, theme selection, Contents filtering and script cancellation. Alt-prefixed keys can also be entered as Escape then the key where the terminal supports that convention. The ribbon uses a latched fallback, not a claim of portable Alt-key-release detection. Ctrl+H is kept compatible with Backspace; it is deliberately not Replace.
 
 The clipboard is **application-local**. Pasting from the operating system uses the terminal's own paste shortcut and bracketed-paste protocol. MDBM does not write OSC-52 clipboard escapes.
+
+### Working across documents
+
+Up to **32 documents** can stay open, with their own text, undo history,
+selection, scroll and preview. The tab strip keeps the active document
+visible; **Ctrl+B** provides a filterable list when tabs overflow. Type
+parts of a filename or relative path, then press Enter or click a result.
+An asterisk marks unsaved text. Escape leaves the current document alone.
+
+**Navigate → Search open documents** searches the current in-memory text
+of every open buffer, including unsaved and untitled documents. Search is
+literal and case-sensitive. Results show a filename, one-based source
+line and character column, and a short excerpt. Enter selects the match in
+Edit. Results are capped at 200; a changed or closed document cannot reuse
+an obsolete result. This command searches open buffers only; it does not
+scan unopened files on disk.
+
+**File → Save all changed documents** saves dirty buffers in tab order.
+Untitled buffers prompt for Save As, and changed destinations retain the
+usual conflict confirmation. Cancel or an error stops the remaining saves;
+earlier successful saves remain on disk. When the batch finishes, the
+original document becomes active again. All these commands are also
+available through **Ctrl+P**.
 
 ### Drag-and-drop files in a terminal
 
@@ -165,7 +194,16 @@ Normal content is opaque to decoration. Immersive behind-content art is opt-in; 
 
 ## Recovery and scripts
 
-Session and recovery data live in the configured local `.mdbm/` directory. A dirty recovery snapshot is separate from the source file: it does **not** silently save over that file. Restoring it retains the original disk fingerprint, so later external edits still trigger conflict checks. Snapshots are local plaintext, not encrypted. A second instance cannot take over another instance's state lock. Copy the source files and recovery directory before destructive troubleshooting.
+Session and recovery data live in the configured local `.mdbm/` directory. A dirty recovery snapshot is separate from the source file: it does **not** silently save over that file. Restoring it retains the original disk fingerprint, so later external edits still trigger conflict checks. Snapshots are local plaintext, not encrypted. State-owner checks retain live or uncertain owners, and Windows probes do not send console signals. Copy the source files and recovery directory before destructive troubleshooting.
+
+A previous session's snapshot is preserved before the new session starts
+writing recovery. **Later** and `--no-restore` keep that snapshot for a
+subsequent launch. Opening a specific file and restoring or discarding its
+recovery preserves the other documents in the same bundle. Recovery is
+validated before changing the open buffers, and differing current unsaved
+text is never silently replaced. Unchanged recoverable state does not
+rewrite the snapshot every interval. See the improvement report for the
+remaining aggregate-size and simultaneous-startup limitations.
 
 Scripts are trusted programs, **not a sandbox**. Only explicitly allowlisted `.py` siblings of `mdbm.py` are shown; `mdbm.py` itself is excluded. Arguments must be a JSON array such as `["a path with spaces", "--check"]`. The host invokes the current interpreter with shell disabled and captures bounded output. Themes and documents cannot launch them. POSIX cancellation terminates the process group; Windows cancellation currently targets the launched process, not every descendant.
 
@@ -179,11 +217,28 @@ python tests/render_gallery.py
 python tests/render_animation_gallery.py
 ```
 
-The delivered verification report records **513 passing tests**, including **96 deterministic golden configurations** and **four real POSIX pseudo-terminal tests**. Tests cover editing, geometry, source maps, modal interactions, conflict-safe files, recovery, scripts, malformed themes and bounded decoration. Golden baselines are implementation regression fixtures, not an independent visual oracle. `tests/update_goldens.py` updates them explicitly; review the gallery rather than accepting changed hashes blindly.
+The current source-bound results and remaining findings are recorded in
+[the improvement report](docs/IMPROVEMENT_PASS_2026-11-03.md). The permanent
+[CI workflow](.github/workflows/tests.yml) runs the full suite on Ubuntu
+with Python 3.11 and 3.13 and on Windows with Python 3.13. Every job requires
+the real Markdown plugins, builds a wheel, and checks installed console
+entry points plus all 27 packaged themes in both target and prefix layouts.
 
-The local environment had prompt-toolkit 3.0.52, below the declared 3.0.53 minimum, and lacked `mdit-py-plugins`. Therefore these results use the visibly diagnosed bootstrap parser path. The requirement bounds have **not** been weakened. The supplied CI workflow requires the release dependency path, but that remote workflow has not been run here.
+The suite includes **96 deterministic golden configurations**, real POSIX
+pseudo-terminal interactions, recovery/data-loss regressions, deterministic
+preview interleavings, and a live-child state-lock probe on both platforms.
+PTY assertions reconstruct the visible terminal screen before checking text;
+raw escape sequences are retained for terminal-mode cleanup checks.
+Golden baselines remain implementation regression fixtures, not an independent
+visual oracle. `tests/update_goldens.py` updates them explicitly; review the
+gallery rather than accepting changed hashes blindly. This pass does not
+change the golden baselines.
 
-Native Windows Terminal, macOS/Linux GUI-terminal acceptance, strict release-dependency verification, end-to-end latency under load, and accessibility/flash auditing remain open. Large-document parsing is full-document, not incremental: the included 100,000-line probe took approximately **22 seconds** to generate its preview with approximately **191 MiB** process peak memory. File operations/recovery writes remain synchronous. Do not equate fast small-document composition with passing the full latency requirement.
+The 513-test/bootstrap-parser measurements in the original implementation
+report are retained as historical evidence. This pass installs and tests
+the declared release dependencies without weakening their bounds.
+
+Native Windows Terminal, macOS/Linux GUI-terminal acceptance, end-to-end latency under load, and accessibility/flash auditing remain open. Large-document parsing is full-document, not incremental: the historical 100,000-line probe took approximately **22 seconds** to generate its preview with approximately **191 MiB** process peak memory. File operations/recovery writes and open-buffer search remain synchronous. Do not equate fast small-document composition with passing the full latency requirement.
 
 Start with copies of valuable documents while evaluating this alpha. The exact delivered scope, remaining gaps, measurements and commands are in **`docs/IMPLEMENTATION_REPORT.md`**.
 
