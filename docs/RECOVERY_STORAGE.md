@@ -118,5 +118,10 @@ matching `recovery.json` or `recovery-<token>.json` are accepted only with
 supported recovery envelopes; invalid, non-object and future-version payloads
 raise an explicit error without creating or replacing a file. They can never
 fall through to ordinary JSON publication and bypass `recovery.guard` or the
-live-owner check. Ordinary state names (such as `session.json`) retain the
-existing JSON writer.
+live-owner check. Only the kernel-lock owner may publish the shared
+`session.json`; secondary instances still read the session and publish their
+own recovery slots, but cannot overwrite the primary's session on disk.
+`lock.json` and tokenized `lease-*.json` records are private to the store
+lifecycle and cannot be written through generic `StateStore.write`, because
+forged owner metadata could make a live recovery archive appear reclaimable.
+The primary's ordinary session writes remain supported.

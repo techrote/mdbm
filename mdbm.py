@@ -2244,6 +2244,7 @@ def _process_alive(pid: Any) -> bool:
 RECOVERY_MANIFEST_BYTES = 16 * 1024 * 1024
 RECOVERY_PAGE_SIZE = 24
 _RECOVERY_NAME = re.compile(r'recovery(?:-[0-9a-f]{32})?\.json\Z')
+_STATE_LEASE_NAME = re.compile(r'lease-[0-9a-f]{32}\.json\Z')
 _RECOVERY_BLOB = re.compile(r'content-([0-9a-f]{64})\.bin\Z')
 _JSON_STRING_SPECIAL = re.compile(r'["\\]')
 
@@ -2492,6 +2493,15 @@ class StateStore:
 
     def write(self, name: str, value: Any) -> None:
         if not self.enabled: return
+        # Kernel ownership and lease records belong to the StateStore
+        # lifecycle, never to generic application-state publication.
+        # Allowing their replacement can make a live owner appear stale.
+        if name=='lock.json' or _STATE_LEASE_NAME.fullmatch(name):
+            raise MDBMError('Ownership metadata is internal; state write rejected.')
+        # A secondary must not replace the primary's last session, even
+        # though its own unsaved work is written to an isolated recovery slot.
+        if name=='session.json' and not self.owns_lock:
+            raise MDBMError('Another instance owns session state; previous session retained.')
         if _RECOVERY_NAME.fullmatch(name):
             # Recovery files must never fall through to unguarded JSON
             # publication, even for invalid or future-version payloads.

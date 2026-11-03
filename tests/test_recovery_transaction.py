@@ -128,3 +128,47 @@ def test_invalid_recovery_write_creates_no_slot_and_regular_state_still_writes(s
     assert not (store.directory/name).exists()
     store.write('session.json',{'schema':'mdbm-session/2.0','documents':[]})
     assert store.read('session.json')['schema']=='mdbm-session/2.0'
+
+
+def test_secondary_cannot_clobber_primary_session_or_owner_metadata(store):
+    store.write('session.json',{'schema':'mdbm-session/2.0','documents':[],'marker':'primary'})
+    follower=m.StateStore(store.directory)
+    assert follower.enabled and not follower.owns_lock
+    try:
+        session=(store.directory/'session.json').read_bytes()
+        with pytest.raises(m.MDBMError,match='Another instance owns session'):
+            follower.write('session.json',{'schema':'mdbm-session/2.0','marker':'follower'})
+        assert (store.directory/'session.json').read_bytes()==session
+        for name in ('lock.json',f'lease-{store.token}.json',f'lease-{follower.token}.json'):
+            original=(store.directory/name).read_bytes()
+            for actor in (store,follower):
+                with pytest.raises(m.MDBMError,match='Ownership metadata is internal'):
+                    actor.write(name,{'pid':-1,'token':'invalid'})
+                assert (store.directory/name).read_bytes()==original
+        assert store.read('lock.json')['token']==store.token
+    finally:
+        follower.close()
+
+
+def test_primary_cannot_spoof_follower_lease_to_replace_live_recovery(store,tmp_path):
+    follower=m.StateStore(store.directory)
+    assert follower.enabled and not follower.owns_lock
+    try:
+        name=follower.recovery_name
+        follower.write(name,bundle(tmp_path,['follower unsaved']))
+        original=(store.directory/name).read_bytes()
+        lease=f'lease-{follower.token}.json'
+        with pytest.raises(m.MDBMError,match='Ownership metadata is internal'):
+            store.write(lease,{'pid':-1,'token':follower.token,'primary':False})
+        assert store.snapshot_live(store.recovery_metadata(name,4096))
+        with pytest.raises(m.MDBMError,match='another instance'):
+            store.write(name,bundle(tmp_path,['primary overwrite']))
+        assert (store.directory/name).read_bytes()==original
+    finally:
+        follower.close()
+
+
+def test_primary_session_publication_still_works(store):
+    store.write('session.json',{'schema':'mdbm-session/2.0','documents':[],'marker':'first'})
+    store.write('session.json',{'schema':'mdbm-session/2.0','documents':[],'marker':'second'})
+    assert store.read('session.json')['marker']=='second'

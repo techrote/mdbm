@@ -47,3 +47,20 @@ primary's protected archive outright. All recovery filenames now enter the
 guarded recovery-validation path or fail closed before any write. Regression
 cases cover malformed and unknown schemas, non-object payloads, primary-owned
 and another instance's live archive, and ordinary session JSON unaffected.
+
+
+## Administrative state publication boundary
+
+A further generic-dispatch audit found that the session and ownership records
+still lacked equivalent isolation. A secondary could call `StateStore.write`
+to replace the primary's `session.json`, and either instance could replace
+`lock.json` or a tokenized lease record, falsifying the liveness evidence
+used to protect another instance's recovery archive.
+
+The public writer now rejects administrative owner/lease names for every
+instance, and permits `session.json` only while holding the primary kernel
+owner lock. Store creation/close still manage owner and lease records through
+their internal lifecycle; primary session writes and each instance's recovery
+publication remain unchanged. Tests cover session preservation, attempts to
+forge the primary and follower's owner/lease records, the live-follower
+recovery boundary, and repeated legitimate primary session writes.
