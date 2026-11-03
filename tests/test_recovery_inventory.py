@@ -132,4 +132,3 @@ def test_recovery_completion_after_closing_cannot_publish_or_consume_archive(tmp
         assert (workspace.store.directory/name).exists()
         assert not (workspace.store.directory/workspace.store.recovery_name).exists()
     finally: workspace.store.close()
-

@@ -198,4 +198,3 @@ def test_legacy_object_key_count_is_bounded_before_large_dictionary_allocation(s
     (store.directory/'recovery.json').write_text(json.dumps(record))
     with pytest.raises(m.MDBMError,match='too many fields'):
         store.recovery_metadata('recovery.json',4096)
-
