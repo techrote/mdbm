@@ -364,3 +364,48 @@ def test_fifo_content_blob_cannot_block_restore_or_republication(store,tmp_path)
     assert stat.S_ISFIFO(blob.lstat().st_mode)
     with m.StateFileLock(store.directory/'recovery.guard'):
         pass
+
+
+@pytest.mark.skipif(not hasattr(os,'mkfifo'),reason='POSIX FIFOs only')
+def test_fifo_secondary_lease_cannot_stall_recovery_owner_checks(store,tmp_path):
+    """An unreadable live-owner lease preserves the foreign snapshot without hanging."""
+    follower=m.StateStore(store.directory)
+    assert follower.enabled and not follower.owns_lock
+    name=follower.recovery_name
+    archive=store.directory/name
+    lease=store.directory/f'lease-{follower.token}.json'
+    try:
+        follower.write(name,bundle(tmp_path,['unsaved follower buffer']))
+        original=archive.read_bytes()
+        lease.unlink()
+        os.mkfifo(lease)
+        assert store.read(lease.name,4096) is None
+        assert store.snapshot_live(store.recovery_metadata(name,4096))
+        with pytest.raises(m.MDBMError,match='reserved this recovery slot'):
+            store.write(name,bundle(tmp_path,['foreign overwrite']))
+        with pytest.raises(m.MDBMError,match='another instance'):
+            store.discard_recovery(name)
+        assert archive.read_bytes()==original
+        assert stat.S_ISFIFO(lease.lstat().st_mode)
+        with m.StateFileLock(store.directory/'recovery.guard'):
+            pass
+    finally:
+        follower.close()
+
+
+@pytest.mark.skipif(not hasattr(os,'mkfifo'),reason='POSIX FIFOs only')
+def test_fifo_primary_owner_record_cannot_stall_state_startup(tmp_path):
+    """A suspect lock.json must not hang initialization while owner.guard is held."""
+    directory=tmp_path/'state'
+    directory.mkdir()
+    lock=directory/'lock.json'
+    os.mkfifo(lock)
+    store=m.StateStore(directory)
+    try:
+        assert store.enabled and not store.owns_lock
+        assert store.read('lock.json',4096) is None
+        assert stat.S_ISFIFO(lock.lstat().st_mode)
+        assert (directory/f'lease-{store.token}.json').is_file()
+    finally:
+        store.close()
+    assert stat.S_ISFIFO(lock.lstat().st_mode)
