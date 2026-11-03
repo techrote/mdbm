@@ -2747,7 +2747,7 @@ class StateStore:
         schema=value.get('schema'); sources=([value] if schema=='mdbm-recovery/1.0' else value.get('documents'))
         if not isinstance(sources,list) or not sources or len(sources)>MAX_OPEN_DOCUMENTS:
             raise MDBMError('Recovery document set exceeds its limit.')
-        docs=[]; texts={}
+        docs=[]; texts={}; declared_sizes={}
         fields={'document_id','path','text','digest','baseline','fingerprint','cursor','anchor',
                 'newline','bom','memories','contents_collapsed','content','bytes'}
         for item in sources:
@@ -2761,6 +2761,13 @@ class StateStore:
                 if type(size) is not int or not 0<=size<=self.max_recovery_bytes:
                     raise MDBMError('Recovery source exceeds its size limit.')
                 if item.get('digest')!=digest: raise MDBMError('Recovery content digest is inconsistent.')
+                # Each digest names one immutable byte stream, irrespective of
+                # how many documents share it. A conflicting size in a second
+                # document must not overwrite a readable snapshot with a
+                # manifest that no reader could subsequently hydrate.
+                prior_size=declared_sizes.setdefault(digest,size)
+                if prior_size!=size:
+                    raise MDBMError('Inconsistent recovery content sizes; previous snapshot retained.')
                 docs.append(dict(item)); continue
             text=item.get('text')
             if not isinstance(text,str): raise MDBMError('Invalid recovery source.')
