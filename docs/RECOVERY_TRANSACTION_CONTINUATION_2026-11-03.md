@@ -135,3 +135,18 @@ possible after the follower closes and removes its lease.
 The change does not defend against an adversarial process directly
 modifying or deleting another instance's files at the OS permission level.
 This is cooperative API integrity and safe handling of corrupted metadata.
+
+## Disabled persistence must reject direct recovery access
+
+The generic state writer already skips publication when persistence is disabled,
+but the public recovery-specific read, metadata, publication and discard methods
+previously bypassed that state check. A failed store could still create the
+recovery guard or publish a follower snapshot through `write_recovery`; an
+unexpected disabled primary could also discard existing recovery evidence.
+
+These methods now fail closed with `MDBMError` before acquiring a guard,
+preparing content, reading archives or mutating the filesystem. This is distinct
+from the existing no-op behavior of generic `write`, which is unchanged.
+Regression cases cover existing primary data and shared blobs remaining byte-
+identical, as well as a disabled secondary unable to create its first archive.
+Internal initialization and lifecycle lease writes remain unchanged.

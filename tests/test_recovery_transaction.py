@@ -282,3 +282,47 @@ def test_generic_json_write_cannot_corrupt_shared_recovery_content(store,tmp_pat
             assert store.read_recovery(snapshot,4096)['documents'][0]['text']==text
     finally:
         follower.close()
+
+
+def test_disabled_primary_cannot_access_or_modify_recovery_directly(store,tmp_path):
+    name=store.recovery_name
+    original_text='keep unsaved after persistence failure'
+    store.write(name,bundle(tmp_path,[original_text]))
+    manifest=(store.directory/name).read_bytes()
+    blobs={p.name:p.read_bytes() for p in store.directory.glob('content-*.bin')}
+    assert blobs
+    # Model a persistence failure after the initial durable write. The normal
+    # generic writer already returns without writing, but direct methods must
+    # not reacquire recovery.guard or touch durable state.
+    store.enabled=False
+    try:
+        operations=(
+            lambda:store.read_recovery(name,4096),
+            lambda:store.recovery_metadata(name,4096),
+            lambda:store.write_recovery(name,bundle(tmp_path,['clobber old text'])),
+            lambda:store.discard_recovery(name),
+            lambda:store.discard_recovery(name,allow_invalid=True),
+        )
+        for operation in operations:
+            with pytest.raises(m.MDBMError,match='Persistence unavailable'):
+                operation()
+        assert (store.directory/name).read_bytes()==manifest
+        assert {p.name:p.read_bytes() for p in store.directory.glob('content-*.bin')}==blobs
+    finally:
+        store.enabled=True
+    assert store.read_recovery(name,4096)['documents'][0]['text']==original_text
+
+
+def test_disabled_secondary_cannot_publish_its_first_snapshot(store,tmp_path):
+    follower=m.StateStore(store.directory)
+    assert follower.enabled and not follower.owns_lock
+    name=follower.recovery_name
+    try:
+        follower.enabled=False
+        with pytest.raises(m.MDBMError,match='Persistence unavailable'):
+            follower.write_recovery(name,bundle(tmp_path,['should not publish']))
+        assert not (store.directory/name).exists()
+        assert not list(store.directory.glob('content-*.bin'))
+    finally:
+        follower.enabled=True
+        follower.close()

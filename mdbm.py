@@ -2578,12 +2578,22 @@ class StateStore:
                     raise MDBMError('Recovery text failed its integrity check.')
         return record
 
+    def _require_recovery_enabled(self) -> None:
+        # A failed StateStore must not create a recovery guard, read through
+        # an unsafe state directory, or mutate another owner's archives.
+        # Generic write() already fails closed by returning early, but direct
+        # recovery entry points also need an explicit boundary.
+        if not self.enabled:
+            raise MDBMError('Persistence unavailable; recovery access rejected.')
+
     def read_recovery(self, name: str, max_bytes: int) -> dict[str,Any]:
+        self._require_recovery_enabled()
         # Readers share the publication guard with deletion and collection.
         with StateFileLock(self.directory/'recovery.guard',True):
             return self._read_recovery(name,max_bytes)
 
     def recovery_metadata(self, name: str, max_bytes: int) -> dict[str,Any]:
+        self._require_recovery_enabled()
         with StateFileLock(self.directory/'recovery.guard',True):
             return self._read_recovery(name,max_bytes,True)
 
@@ -2748,6 +2758,7 @@ class StateStore:
         self._collect_orphan_blobs()
 
     def write_recovery(self, name: str, value: Mapping[str,Any]) -> None:
+        self._require_recovery_enabled()
         if not _RECOVERY_NAME.fullmatch(name): raise MDBMError('Invalid recovery snapshot name.')
         docs,texts,encoded=self._prepare_recovery(value)
         with StateFileLock(self.directory/'recovery.guard',True):
@@ -2762,6 +2773,7 @@ class StateStore:
 
     def discard_recovery(self, name: str, remaining: Mapping[str,Any] | None = None,
                          allow_invalid: bool = False) -> None:
+        self._require_recovery_enabled()
         if not _RECOVERY_NAME.fullmatch(name): raise MDBMError('Invalid recovery snapshot name.')
         with StateFileLock(self.directory/'recovery.guard',True):
             try: record=self._read_recovery(name,self.max_recovery_bytes,True)
