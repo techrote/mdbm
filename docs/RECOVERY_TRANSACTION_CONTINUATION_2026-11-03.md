@@ -113,3 +113,25 @@ reuse. A parameterized companion verifies that malformed/unknown PID values
 liveness logic nor ownership-failure behavior was relaxed. Future assertions
 must distinguish a demonstrably exited PID from an unknown one. Exact-head
 Linux/Windows tests and installed-wheel checks must pass before merging.
+
+## Corrupt lease fail-closed follow-up
+
+A further audit found that `snapshot_live` used `StateStore.read`, which
+returns `None` both when a lease is absent and when an *existing* lease is
+unreadable. The previous ownership check then treated the invalid lease as
+proof of a dead owner. A primary could consequently overwrite another live
+instance's otherwise valid archive, or use explicit invalid-archive discard to
+remove a damaged foreign archive whose matching lease was corrupted.
+
+The guard now differentiates an absent lease from an existing but unverified
+lease. An absent lease permits existing stale-archive workflows; a present
+unreadable or inconsistent lease retains the archive. The explicit
+`allow_invalid` discard route delegates to the same conservative
+`snapshot_live` policy, avoiding different owner semantics for valid and
+invalid manifests. Tests exercise both overwrite and discard protection
+against unreadable follower leases and verify that explicit reclaim is
+possible after the follower closes and removes its lease.
+
+The change does not defend against an adversarial process directly
+modifying or deleting another instance's files at the OS permission level.
+This is cooperative API integrity and safe handling of corrupted metadata.
