@@ -2698,8 +2698,17 @@ class StateStore:
         removed=0
         for path in self.directory.iterdir():
             match=_RECOVERY_BLOB.fullmatch(path.name)
-            if match and match.group(1) not in referenced and not path.is_symlink():
-                size=path.stat().st_size; path.unlink(); removed+=size
+            if not match or match.group(1) in referenced: continue
+            # A directory, FIFO or symlink merely resembling a blob must not
+            # interrupt the recovery transaction or be removed by GC. Only
+            # regular, unreferenced content is ours to collect.
+            try:
+                st=path.lstat()
+                if not stat.S_ISREG(st.st_mode): continue
+                path.unlink(); removed+=st.st_size
+            except FileNotFoundError:
+                # A non-cooperating process may have removed it already.
+                continue
         return removed
 
     def collect_recovery_garbage(self) -> int:
