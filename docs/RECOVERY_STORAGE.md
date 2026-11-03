@@ -76,11 +76,15 @@ and content hashes in the disk worker. The completion handler checks the
 current workspace, pending saves, dirty conflicts and capacity before applying
 those prepared models; it does not repeat full-document indexing or hashing.
 
-Unreferenced content is collected while holding the publication guard. If any
-archive cannot be inspected, automatic collection stops conservatively because
-that archive might still reference useful content. Discarding the unreadable
-archive explicitly makes later collection possible. The inventory also exposes
-an explicit **Reclaim unreferenced recovery content** action.
+Unreferenced **regular** content files are collected while holding the
+publication guard. A directory, FIFO, device or symlink that merely has a
+`content-<sha256>.bin`-shaped name is not treated as a deletable blob: it is
+preserved rather than aborting unrelated snapshot publication. A referenced
+non-regular blob remains unreadable and fails closed on restore/publication.
+If any archive cannot be inspected, automatic collection stops conservatively
+because that archive might still reference useful content. Discarding the
+unreadable archive explicitly makes later collection possible. The inventory
+also exposes an explicit **Reclaim unreferenced recovery content** action.
 
 ## Ownership and publication
 
