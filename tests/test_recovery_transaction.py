@@ -547,3 +547,34 @@ def test_unstatable_orphan_still_fails_closed_before_publication(store,tmp_path,
         store.write(name,bundle(tmp_path,['attempted overwrite']))
     assert (store.directory/name).read_bytes()==previous
     assert orphan.is_file()
+
+@pytest.mark.parametrize('inaccessible_kind',['blob','archive'])
+def test_quota_never_undercounts_unstatable_entries_when_gc_is_suspended(
+        store,tmp_path,monkeypatch,inaccessible_kind):
+    """An invalid manifest disables GC, not strict publication accounting."""
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['original unsaved work']))
+    previous=(store.directory/name).read_bytes()
+    corrupt=store.directory/('recovery-'+('a'*32)+'.json')
+    corrupt.write_bytes(b'not a JSON recovery manifest')
+    if inaccessible_kind=='blob':
+        obstacle=store.directory/('content-'+('e'*64)+'.bin')
+    else:
+        obstacle=store.directory/('recovery-'+('b'*32)+'.json')
+    obstacle.write_bytes(b'inaccessible recovery pool bytes')
+    original_lstat=type(obstacle).lstat
+
+    def denied_lstat(path,*args,**kwargs):
+        if path==obstacle: raise PermissionError('simulated inaccessible metadata')
+        return original_lstat(path,*args,**kwargs)
+
+    monkeypatch.setattr(type(obstacle),'lstat',denied_lstat)
+    new_text='new work must not replace the previous manifest'
+    new_digest=hashlib.sha256(new_text.encode()).hexdigest()
+    with pytest.raises(m.MDBMError,match='Recovery storage usage cannot be verified'):
+        store.write(name,bundle(tmp_path,[new_text]))
+    assert (store.directory/name).read_bytes()==previous
+    assert corrupt.read_bytes()==b'not a JSON recovery manifest'
+    assert obstacle.read_bytes()==b'inaccessible recovery pool bytes'
+    assert not (store.directory/('content-'+new_digest+'.bin')).exists()
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='original unsaved work'

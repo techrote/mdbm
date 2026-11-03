@@ -86,7 +86,12 @@ Windows still has an open file handle) is left in place and continues to
 count toward the storage quota. A deduplicated diagnostic records deferred
 cleanup, but publication may still proceed if the charged bytes fit.
 In contrast, an orphan that cannot even be *statted* aborts publication
-rather than silently undercounting its unknown size.
+rather than silently undercounting its unknown size. Publication's storage
+accounting is strict even if garbage collection was already suspended by an
+unreadable manifest: inaccessible blob or archive metadata never disappears
+from the quota calculation. An unsafe non-regular archive likewise prevents
+publication until inspected or explicitly removed. The interactive inventory
+remains best-effort so it can still display other archives and diagnostics.
 If any archive cannot be inspected, automatic collection stops conservatively
 because that archive might still reference useful content. Discarding the
 unreadable archive explicitly makes later collection possible. The inventory

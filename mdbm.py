@@ -2656,14 +2656,22 @@ class StateStore:
         owner=record.get('owner',{})
         return not self.snapshot_live(record) or (isinstance(owner,dict) and owner.get('token')==self.token)
 
-    def recovery_inventory(self, offset: int = 0, limit: int = RECOVERY_PAGE_SIZE) -> dict[str,Any]:
-        """Stat every archive before newest-first paging; never read text here."""
+    def recovery_inventory(self, offset: int = 0, limit: int = RECOVERY_PAGE_SIZE,
+                           *, strict_storage: bool = False) -> dict[str,Any]:
+        """Page by timestamp; reject unknown storage usage during publication.
+
+        The interactive inventory is best-effort, but a quota decision cannot
+        skip entries whose sizes are inaccessible. This matters especially when
+        an unreadable manifest has already prevented orphan collection.
+        """
         offset=max(0,offset); limit=max(1,min(100,limit)); newest=[]; total_bytes=0; total=0
         if not self.enabled: return {'entries':[],'total':0,'bytes':0,'offset':offset,'limit':limit}
         for path in self._snapshot_paths():
             try:
                 st=path.lstat()
                 if not stat.S_ISREG(st.st_mode):
+                    if strict_storage:
+                        raise MDBMError('Recovery storage usage cannot be verified: unsafe archive; previous snapshot retained.')
                     item={'name':path.name,'mtime_ns':st.st_mtime_ns,'size':0,'error':'Unsafe state file'}
                 else:
                     item={'name':path.name,'mtime_ns':st.st_mtime_ns,'size':st.st_size}
@@ -2672,10 +2680,16 @@ class StateStore:
                 entry=(item['mtime_ns'],item['name'],item)
                 if len(newest)<offset+limit: heapq.heappush(newest,entry)
                 elif entry[:2]>newest[0][:2]: heapq.heapreplace(newest,entry)
-            except OSError: continue
+            except OSError as exc:
+                if strict_storage:
+                    raise MDBMError('Recovery storage usage cannot be verified: '+display_text(exc)) from None
+                continue
         for path in self.directory.iterdir():
             if _RECOVERY_BLOB.fullmatch(path.name):
-                with contextlib.suppress(OSError): total_bytes+=path.lstat().st_size
+                try: total_bytes+=path.lstat().st_size
+                except OSError as exc:
+                    if strict_storage:
+                        raise MDBMError('Recovery storage usage cannot be verified: '+display_text(exc)) from None
         entries=[entry[2] for entry in sorted(newest,reverse=True)[offset:offset+limit]]
         return {'entries':entries,'total':total,'bytes':total_bytes,
                 'offset':offset,'limit':limit,'storage_limit':self.recovery_storage_limit}
@@ -2795,7 +2809,7 @@ class StateStore:
         """Publish only under recovery.guard, including the quota and GC checks."""
         self._assert_recovery_writable_locked(name)
         self._collect_orphan_blobs()
-        usage=self.recovery_inventory()['bytes']
+        usage=self.recovery_inventory(strict_storage=True)['bytes']
         old_size=self._path(name).stat().st_size if self._path(name).exists() else 0
         missing={}; replaced_bytes=0
         for digest,size in {item['content']:item['bytes'] for item in docs}.items():
