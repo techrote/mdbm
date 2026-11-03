@@ -1,5 +1,7 @@
 """Cross-process recovery ownership and partial-archive publication regression."""
 import hashlib
+import os
+import stat
 import subprocess
 import sys
 
@@ -326,3 +328,39 @@ def test_disabled_secondary_cannot_publish_its_first_snapshot(store,tmp_path):
     finally:
         follower.enabled=True
         follower.close()
+
+
+@pytest.mark.skipif(not hasattr(os,'mkfifo'),reason='POSIX FIFOs only')
+def test_fifo_manifest_cannot_block_recovery_guard(store,tmp_path):
+    """A special-file archive must fail closed, not stall all state publishers."""
+    name='recovery-'+('7'*32)+'.json'
+    fifo=store.directory/name
+    os.mkfifo(fifo)
+    with pytest.raises(m.MDBMError,match='not a regular file'):
+        store.recovery_metadata(name,4096)
+    with pytest.raises(m.MDBMError,match='unreadable'):
+        store.write(name,bundle(tmp_path,['preserve the foreign path']))
+    assert stat.S_ISFIFO(fifo.lstat().st_mode)
+    # A failed inspect/write must release the shared transaction guard.
+    with m.StateFileLock(store.directory/'recovery.guard'):
+        pass
+
+
+@pytest.mark.skipif(not hasattr(os,'mkfifo'),reason='POSIX FIFOs only')
+def test_fifo_content_blob_cannot_block_restore_or_republication(store,tmp_path):
+    """Reject unsafe content without replacing the intact manifest."""
+    original='unsaved buffer still referenced by manifest'
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,[original]))
+    manifest=(store.directory/name).read_bytes()
+    blob=next(store.directory.glob('content-*.bin'))
+    blob.unlink()
+    os.mkfifo(blob)
+    with pytest.raises(m.MDBMError,match='not a regular file'):
+        store.read_recovery(name,4096)
+    with pytest.raises(m.MDBMError,match='not a regular file'):
+        store.write(name,bundle(tmp_path,[original]))
+    assert (store.directory/name).read_bytes()==manifest
+    assert stat.S_ISFIFO(blob.lstat().st_mode)
+    with m.StateFileLock(store.directory/'recovery.guard'):
+        pass
