@@ -2592,11 +2592,19 @@ class StateStore:
         if not isinstance(owner,dict): return False
         token=owner.get('token')
         if not isinstance(token,str) or not re.fullmatch('[0-9a-f]{32}',token): return True
-        lease=self.read('lease-'+token+'.json',4096)
-        if isinstance(lease,dict) and lease.get('primary') is True:
+        lease_name='lease-'+token+'.json'
+        lease=self.read(lease_name,4096)
+        if not isinstance(lease,dict):
+            # Absence proves no lease is held; unreadable *existing* evidence
+            # does not. Preserve the slot rather than treating corruption
+            # as a dead owner. read() reports malformed/oversized JSON as None.
+            return self._path(lease_name).exists()
+        if lease.get('token')!=token or type(lease.get('primary')) is not bool:
+            return True  # Inconsistent ownership metadata is unverified.
+        if lease['primary']:
             current=self.read('lock.json',4096)
             if not isinstance(current,dict) or current.get('token')!=token: return False
-        return isinstance(lease,dict) and lease.get('token')==token and _process_alive(lease.get('pid'))
+        return _process_alive(lease.get('pid'))
 
     def can_modify_recovery(self, name: str, record: Mapping[str,Any]) -> bool:
         if not self.owns_lock: return False
@@ -2760,10 +2768,11 @@ class StateStore:
             except (MDBMError,OSError,UnicodeError,ValueError):
                 if not allow_invalid or not self.owns_lock or name==self.recovery_name: raise
                 token=name.removeprefix('recovery-').removesuffix('.json')
-                if re.fullmatch('[0-9a-f]{32}',token):
-                    lease=self.read('lease-'+token+'.json',4096)
-                    if isinstance(lease,dict) and _process_alive(lease.get('pid')):
-                        raise MDBMError('Snapshot retained: its instance is active.')
+                if re.fullmatch('[0-9a-f]{32}',token) and self.snapshot_live(
+                        {'owner':{'token':token}}):
+                    # Apply the same conservative lease check even when the
+                    # damaged archive itself has no readable owner metadata.
+                    raise MDBMError('Snapshot retained: its instance is active.')
                 record={}
             if not self.can_modify_recovery(name,record): raise MDBMError('Snapshot retained: another instance owns it.')
             if remaining is None:
