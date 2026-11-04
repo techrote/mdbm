@@ -55,6 +55,17 @@ publication deliberately retains both copies for manual resolution. As with
 new-file Save, filesystems lacking atomic hard-link creation fail closed rather
 than falling back to an overwrite-prone copy.
 
+Directory Move also requires an atomic **no-replace** rename, rather than
+trusting an earlier destination-existence check. A racing empty destination
+can otherwise be silently replaced by ordinary POSIX rename. Linux uses
+`renameat2(RENAME_NOREPLACE)`, macOS uses `renamex_np(RENAME_EXCL)`, and
+Windows uses `os.rename` (which rejects an existing destination). Other
+platforms or filesystems without the required primitive fail closed. This
+protects destination ownership; it does not claim to prevent a hostile
+same-account process replacing the source between validation and rename.
+Regression tests cover both direct publication and an intervening empty
+directory created after the initial check.
+
 Local links resolve relative to the active source and must remain within the workspace. Only HTTP, HTTPS and mailto may be handed to a browser, after explicit confirmation; credential-bearing URLs and terminal controls are rejected. No Markdown image is fetched. External links never become shell commands or user-supplied process argument lists; confirmed URLs are passed only to the browser dispatcher.
 
 Recovery files are plaintext, private-permission local data, not encrypted. Treat the workspace account as trusted. Recovery preserves the old disk fingerprint so restoring a snapshot cannot erase a subsequent external edit without conflict confirmation. Malformed or oversized state is ignored with a diagnostic. The state directory may not be a symbolic link. Concurrent state writers are isolated or locked; normal document conflict guards remain in force regardless.

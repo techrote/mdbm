@@ -2150,6 +2150,46 @@ class SafeFiles:
         except OSError as exc: raise PathError(display_text(exc)) from None
         return p
 
+    @staticmethod
+    def _rename_directory_noreplace(src: Path, dst: Path) -> None:
+        """Publish a directory rename without replacing a racing destination.
+
+        A prior exists() check alone cannot guard POSIX rename(), which can
+        replace an empty directory created by another process in between.
+        Fail closed if the host lacks an atomic no-replace rename primitive.
+        """
+        if os.name=='nt':
+            # Windows os.rename rejects an existing destination by contract.
+            try: os.rename(src,dst)
+            except FileExistsError: raise ConflictError('Destination already exists.') from None
+            except OSError as exc: raise PathError('Directory move failed: '+display_text(exc)) from None
+            return
+        if os.name!='posix' or not (sys.platform.startswith('linux') or sys.platform=='darwin'):
+            raise PathError('Atomic no-clobber directory move is unavailable on this platform.')
+        import ctypes
+        libc=ctypes.CDLL(None,use_errno=True)
+        if sys.platform.startswith('linux'):
+            rename=getattr(libc,'renameat2',None)
+            if rename is None:
+                raise PathError('Atomic no-clobber directory move is unavailable on this system.')
+            rename.argtypes=[ctypes.c_int,ctypes.c_char_p,ctypes.c_int,ctypes.c_char_p,ctypes.c_uint]
+            rename.restype=ctypes.c_int
+            # Linux AT_FDCWD=-100 and RENAME_NOREPLACE=1.
+            status=rename(-100,os.fsencode(src),-100,os.fsencode(dst),1)
+        else:
+            rename=getattr(libc,'renamex_np',None)
+            if rename is None:
+                raise PathError('Atomic no-clobber directory move is unavailable on this system.')
+            rename.argtypes=[ctypes.c_char_p,ctypes.c_char_p,ctypes.c_uint]
+            rename.restype=ctypes.c_int
+            # Darwin RENAME_EXCL=0x4, a no-replace directory rename.
+            status=rename(os.fsencode(src),os.fsencode(dst),4)
+        if status:
+            code=ctypes.get_errno()
+            if code in (errno.EEXIST,errno.ENOTEMPTY):
+                raise ConflictError('Destination already exists.') from None
+            raise PathError('Directory move failed: '+os.strerror(code)) from None
+
     def move(self, source: str | Path, destination: str | Path) -> Path:
         src,dst=self.resolve(source),self.resolve(destination)
         if src==dst: return src
@@ -2157,8 +2197,7 @@ class SafeFiles:
         if not dst.parent.is_dir(): raise PathError('Destination directory does not exist.')
         if src.is_dir():
             if dst.is_relative_to(src): raise PathError('Cannot move a directory into itself.')
-            try: os.rename(src,dst)
-            except OSError as exc: raise PathError(display_text(exc)) from None
+            self._rename_directory_noreplace(src,dst)
         else:
             raw,fp=self.raw_read(src)
             # Exact bytes preserved; no newline normalization during a move.

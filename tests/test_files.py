@@ -129,6 +129,49 @@ def test_move_competing_destination_cannot_be_overwritten(tmp_path,monkeypatch):
     assert not list(tmp_path.glob('.mdbm-save-*'))
 
 
+def test_directory_move_atomic_no_replace_and_success(tmp_path):
+    """The final rename itself must reject a pre-existing empty directory.
+
+    Unlike a nonempty directory, an empty competing POSIX destination can be
+    silently replaced by plain os.rename after an earlier exists() check.
+    """
+    f=m.SafeFiles(tmp_path)
+    src=tmp_path/'source';src.mkdir();(src/'keep.md').write_text('precious')
+    dst=tmp_path/'destination';dst.mkdir()
+    try:
+        with pytest.raises(m.ConflictError,match='Destination already exists'):
+            f._rename_directory_noreplace(src,dst)
+    except m.PathError as exc:
+        if 'unavailable' in str(exc):
+            pytest.skip(str(exc))
+        raise
+    assert src.is_dir() and (src/'keep.md').read_text()=='precious'
+    assert dst.is_dir() and not list(dst.iterdir())
+    dst.rmdir()
+    assert f.move(src,dst)==dst
+    assert not src.exists() and (dst/'keep.md').read_text()=='precious'
+
+
+def test_directory_move_racing_empty_destination_is_not_replaced(tmp_path,monkeypatch):
+    f=m.SafeFiles(tmp_path)
+    src=tmp_path/'source';src.mkdir();(src/'keep.md').write_text('source data')
+    dst=tmp_path/'destination'
+    original=f._rename_directory_noreplace
+    def publish_after_competitor(source,target):
+        target.mkdir()  # Simulate another process winning after the initial check.
+        return original(source,target)
+    monkeypatch.setattr(m.SafeFiles,'_rename_directory_noreplace',staticmethod(publish_after_competitor))
+    try:
+        with pytest.raises(m.ConflictError,match='Destination already exists'):
+            f.move(src,dst)
+    except m.PathError as exc:
+        if 'unavailable' in str(exc):
+            pytest.skip(str(exc))
+        raise
+    assert (src/'keep.md').read_text()=='source data'
+    assert dst.is_dir() and not list(dst.iterdir())
+
+
 def test_trash_failure_never_deletes(tmp_path,monkeypatch):
     p=tmp_path/'keep.md';p.write_text('keep')
     def reject(_):raise OSError('trash unavailable')
