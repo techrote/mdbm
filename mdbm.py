@@ -2792,6 +2792,8 @@ class StateStore:
         docs=[]; texts={}; declared_sizes={}
         seen_ids:set[str]=set()
         seen_paths:set[str]=set()
+        root=value.get('root')
+        root_base=os.path.abspath(root) if isinstance(root,str) else os.getcwd()
         fields={'document_id','path','text','digest','baseline','fingerprint','cursor','anchor',
                 'newline','bom','memories','contents_collapsed','content','bytes'}
         for item in sources:
@@ -2809,7 +2811,9 @@ class StateStore:
                 seen_ids.add(ident)
             path=item.get('path')
             if isinstance(path,str):
-                key=os.path.normcase(os.path.abspath(path))
+                # Match SafeFiles.resolve(): relative paths belong to the
+                # recorded workspace, not the current process directory.
+                key=os.path.normcase(os.path.abspath(os.path.join(root_base,path)))
                 if key in seen_paths:
                     raise MDBMError('Duplicate recovery document path; previous snapshot retained.')
                 seen_paths.add(key)
