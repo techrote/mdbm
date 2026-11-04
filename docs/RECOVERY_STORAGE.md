@@ -63,9 +63,18 @@ inventory. An inspected, readable snapshot is also a versioned selection:
 when its metadata changes before the guarded discard or partial replacement,
 MDBM refuses that stale confirmation and retains the newer archive. This
 check occurs while holding `recovery.guard` and before any rewrite or deletion.
-The explicit **Discard unreadable snapshot** command similarly refuses to
-remove an archive that has become readable since it was inspected; the user
-must refresh the inventory and inspect the new revision. Ordinary programmatic
+The explicit **Discard unreadable snapshot** command binds its confirmation
+to the inspected regular file's device/inode, size, and nanosecond modification
+and change timestamps. The identity is captured with the metadata read while
+holding `recovery.guard` and compared under that same guard immediately before
+a confirmed deletion. It refuses a replacement even if the successor is also
+unreadable (or has become readable). Missing, inaccessible and non-regular
+entries have no valid destructive confirmation; refresh inventory instead.
+This bounded identity check protects cooperating MDBM publications and routine
+external replacements, but is not a cryptographic digest or a guarantee
+against hostile unguarded writers that forge filesystem attributes. Direct
+programmatic invalid-archive deletion without an expected identity remains an
+explicit unversioned operation and must not be used for delayed UI intents. Ordinary programmatic
 discard remains available without a version precondition, for callers that
 intentionally act on the current snapshot under the guard.
 

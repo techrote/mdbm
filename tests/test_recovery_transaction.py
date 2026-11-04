@@ -763,3 +763,47 @@ def test_restore_read_accepts_matching_archive_revision(store,tmp_path,format_na
     assert (restored['text'] if format_name=='legacy_v1' else
             restored['documents'][0]['text'])=='retained unsaved text'
     assert (store.directory/name).read_bytes()==before
+
+
+@pytest.mark.parametrize('replacement',['same_inode','new_inode'])
+def test_unreadable_selection_refuses_changed_unreadable_successor(store,tmp_path,replacement):
+    """Even another malformed snapshot is not the archive the user confirmed."""
+    name='recovery-'+('d'*32)+'.json'
+    archive=store.directory/name
+    archive.write_bytes(b'{broken version A')
+    inspected,error,revision=store.inspect_recovery_revision(name,4096)
+    assert inspected is None and error and revision is not None
+    replacement_bytes=b'{broken version B'
+    with m.StateFileLock(store.directory/'recovery.guard',True):
+        if replacement=='same_inode':
+            archive.write_bytes(replacement_bytes)
+            after=archive.stat()
+            os.utime(archive,ns=(after.st_atime_ns,after.st_mtime_ns+2_000_000_000))
+        else:
+            pending=store.directory/'pending-invalid-archive'
+            pending.write_bytes(replacement_bytes)
+            pending.replace(archive)
+    assert store._recovery_revision(name)!=revision
+    with pytest.raises(m.MDBMError,match='changed since inspection'):
+        store.discard_recovery(name,allow_invalid=True,expected_unreadable=revision)
+    assert archive.read_bytes()==replacement_bytes
+
+
+def test_unchanged_unreadable_confirmation_can_still_discard(store):
+    name='recovery-'+('d'*32)+'.json'
+    archive=store.directory/name
+    archive.write_bytes(b'{broken but still the confirmed archive')
+    inspected,error,revision=store.inspect_recovery_revision(name,4096)
+    assert inspected is None and error and revision is not None
+    store.discard_recovery(name,allow_invalid=True,expected_unreadable=revision)
+    assert not archive.exists()
+
+
+@pytest.mark.skipif(not hasattr(os,'mkfifo'),reason='POSIX FIFO support required')
+def test_nonregular_unreadable_archive_has_no_discard_identity(store):
+    name='recovery-'+('d'*32)+'.json'
+    archive=store.directory/name
+    os.mkfifo(archive)
+    inspected,error,revision=store.inspect_recovery_revision(name,4096)
+    assert inspected is None and error and revision is None
+    assert stat.S_ISFIFO(archive.lstat().st_mode)

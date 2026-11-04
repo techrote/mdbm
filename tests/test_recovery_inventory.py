@@ -158,3 +158,28 @@ def test_queued_restore_does_not_replace_buffer_with_newer_archive(tmp_path):
         assert workspace.overlays[-1].title=='Recovery operation failed'
     finally:
         workspace.store.close()
+
+
+def test_queued_unreadable_discard_cannot_delete_replaced_malformed_archive(tmp_path):
+    """UI binds the inspected revision, not merely the unreadable filename."""
+    workspace=m.Workspace(config(tmp_path),restore=False)
+    try:
+        name='recovery-'+('d'*32)+'.json'
+        archive=workspace.store.directory/name
+        archive.write_bytes(b'{first broken snapshot')
+        workspace.inspect_recovery(name)
+        confirmation=workspace.overlays[-1]
+        assert confirmation.title=='Unreadable recovery snapshot'
+        discard=next(action for title,action in confirmation.actions
+                     if title=='Discard unreadable snapshot')
+        queued=[]
+        workspace.submit_io=lambda key,work,done: (queued.append((work,done)) or True)
+        discard()
+        assert len(queued)==1
+        archive.write_bytes(b'{new broken snapshot')
+        work,done=queued.pop()
+        with pytest.raises(m.MDBMError,match='changed since inspection'):
+            work()
+        assert archive.read_bytes()==b'{new broken snapshot'
+    finally:
+        workspace.store.close()

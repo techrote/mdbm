@@ -2555,6 +2555,19 @@ class StateStore:
             os.close(fd)
             raise
 
+    def _recovery_revision(self, name: str) -> tuple[int,int,int,int,int]:
+        """Bounded regular-file identity for a confirmed unreadable archive.
+
+        This is a cooperative cross-process version check, not a content digest:
+        recovery.guard serializes MDBM publishers, and descriptor metadata
+        prevents a stale UI confirmation from deleting a replaced bad archive.
+        """
+        if not _RECOVERY_NAME.fullmatch(name):
+            raise MDBMError('Invalid recovery snapshot name.')
+        with self._open_recovery_regular(self._path(name)) as stream:
+            info=os.fstat(stream.fileno())
+        return (info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+
     def _read_recovery(self, name: str, max_bytes: int, metadata_only: bool = False) -> dict[str,Any]:
         if not _RECOVERY_NAME.fullmatch(name): raise MDBMError('Invalid recovery snapshot name.')
         path=self._path(name)
@@ -2629,6 +2642,20 @@ class StateStore:
         self._require_recovery_enabled()
         with StateFileLock(self.directory/'recovery.guard',True):
             return self._read_recovery(name,max_bytes,True)
+
+    def inspect_recovery_revision(self, name: str, max_bytes: int
+                                  ) -> tuple[dict[str,Any] | None,str,tuple[int,int,int,int,int] | None]:
+        """Inspect readable or damaged archives with one guarded identity."""
+        self._require_recovery_enabled()
+        with StateFileLock(self.directory/'recovery.guard',True):
+            try: revision=self._recovery_revision(name)
+            except (MDBMError,OSError,UnicodeError,ValueError) as exc:
+                # Do not offer a destructive action for a missing, special,
+                # inaccessible, or otherwise unidentifiable directory entry.
+                return None,display_text(exc),None
+            try: return self._read_recovery(name,max_bytes,True),'',revision
+            except (MDBMError,OSError,UnicodeError,ValueError) as exc:
+                return None,display_text(exc),revision
 
     def snapshot_live(self, record: Mapping[str,Any]) -> bool:
         owner=record.get('owner')
@@ -2865,10 +2892,18 @@ class StateStore:
 
     def discard_recovery(self, name: str, remaining: Mapping[str,Any] | None = None,
                          allow_invalid: bool = False, *,
-                         expected_metadata: Mapping[str,Any] | None = None) -> None:
+                         expected_metadata: Mapping[str,Any] | None = None,
+                         expected_unreadable: tuple[int,int,int,int,int] | None = None) -> None:
         self._require_recovery_enabled()
         if not _RECOVERY_NAME.fullmatch(name): raise MDBMError('Invalid recovery snapshot name.')
         with StateFileLock(self.directory/'recovery.guard',True):
+            if expected_unreadable is not None:
+                if not allow_invalid:
+                    raise MDBMError('An unreadable selection requires explicit discard authorization.')
+                # This must run under the *same* transaction guard as unlink.
+                # A second corrupt publication is still a changed selection.
+                if self._recovery_revision(name)!=expected_unreadable:
+                    raise MDBMError('Recovery archive changed since inspection; refresh inventory.')
             try: record=self._read_recovery(name,self.max_recovery_bytes,True)
             except (MDBMError,OSError,UnicodeError,ValueError):
                 if not allow_invalid or not self.owns_lock or name==self.recovery_name: raise
@@ -4382,18 +4417,18 @@ class Workspace:
         loading=Overlay('picker','Inspecting recovery snapshot',message='Esc cancels inspection.',
                         items=[MenuItem('Reading saved document details…',enabled=False)])
         self.push_overlay(loading)
-        def load() -> tuple[dict[str,Any] | None,str]:
-            try: return store.recovery_metadata(name,maximum),''
-            except (MDBMError,OSError,UnicodeError,ValueError) as exc: return None,display_text(exc)
-        def display(result: tuple[dict[str,Any] | None,str]) -> None:
+        def load() -> tuple[dict[str,Any] | None,str,tuple[int,int,int,int,int] | None]:
+            return store.inspect_recovery_revision(name,maximum)
+        def display(result: tuple[dict[str,Any] | None,str,tuple[int,int,int,int,int] | None]) -> None:
             self.close_overlay(False)
-            record,error=result
+            record,error,revision=result
             if record is not None: self._present_recovery(name,record,inventory=True)
             else:
                 actions=[('Back',self.show_recovery_inventory)]
-                if store.owns_lock and name!=store.recovery_name:
+                if store.owns_lock and name!=store.recovery_name and revision is not None:
                     actions.insert(0,('Discard unreadable snapshot',lambda:self._recovery_io(
-                        lambda:store.discard_recovery(name,allow_invalid=True),lambda value:self.show_recovery_inventory())))
+                        lambda:store.discard_recovery(name,allow_invalid=True,
+                            expected_unreadable=revision),lambda value:self.show_recovery_inventory())))
                 self.confirm('Unreadable recovery snapshot',display_text(name)+'\n'+error+
                              '\nDiscard permanently removes this recovery archive; source files are unchanged.',actions,default=len(actions)-1)
         self._recovery_io(load,display,loading)
