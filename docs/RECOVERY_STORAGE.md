@@ -18,6 +18,11 @@ the same byte length. Conflicting sizes are rejected before any publication or
 partial-discard replacement; this prevents an inconsistent manifest from
 replacing a restorable snapshot. Correctly shared content remains deduplicated.
 
+Recovery publication also rejects duplicate document identities and duplicate
+normalized document paths before touching durable manifests or content. Restore
+already rejects these ambiguities; accepting them at publication would replace
+a readable snapshot with a bundle that cannot be safely restored.
+
 The writer and reader enforce the same limits: at most 32 documents, each
 within the configured `application.max_file_mib` UTF-8 byte budget, and a
 manifest no larger than 16 MiB. Text no longer expands into ASCII-escaped JSON
@@ -72,11 +77,9 @@ unreadable (or has become readable). Missing, inaccessible and non-regular
 entries have no valid destructive confirmation; refresh inventory instead.
 This bounded identity check protects cooperating MDBM publications and routine
 external replacements, but is not a cryptographic digest or a guarantee
-against hostile unguarded writers that forge filesystem attributes. Direct
-programmatic invalid-archive deletion without an expected identity remains an
-explicit unversioned operation and must not be used for delayed UI intents.
-Callers intentionally acting on the current snapshot under the guard may still
-use that API without a version precondition.
+against hostile unguarded writers that forge filesystem attributes. Programmatic invalid-archive deletion also requires that inspected revision;
+there is no unversioned `allow_invalid=True` bypass. Callers must inspect,
+present a confirmation and pass the same identity to guarded deletion.
 
 File-specific startup restoration preserves unselected sibling documents.
 The original archive is consumed only after the new recovery publication

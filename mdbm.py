@@ -2790,6 +2790,8 @@ class StateStore:
         if not isinstance(sources,list) or not sources or len(sources)>MAX_OPEN_DOCUMENTS:
             raise MDBMError('Recovery document set exceeds its limit.')
         docs=[]; texts={}; declared_sizes={}
+        seen_ids:set[str]=set()
+        seen_paths:set[str]=set()
         fields={'document_id','path','text','digest','baseline','fingerprint','cursor','anchor',
                 'newline','bom','memories','contents_collapsed','content','bytes'}
         for item in sources:
@@ -2797,6 +2799,20 @@ class StateStore:
             if schema=='mdbm-recovery/1.0':
                 item={k:v for k,v in item.items() if k not in ('schema','root','timestamp')}
             if set(item)-fields: raise MDBMError('Unsupported recovery document metadata.')
+            # Restore refuses duplicated live buffer identities/paths. Enforce
+            # that same invariant before any durable manifest can replace
+            # the previous recoverable snapshot (also for v3 partial writes).
+            ident=item.get('document_id')
+            if isinstance(ident,str):
+                if ident in seen_ids:
+                    raise MDBMError('Duplicate recovery document identity; previous snapshot retained.')
+                seen_ids.add(ident)
+            path=item.get('path')
+            if isinstance(path,str):
+                key=os.path.normcase(os.path.abspath(path))
+                if key in seen_paths:
+                    raise MDBMError('Duplicate recovery document path; previous snapshot retained.')
+                seen_paths.add(key)
             if schema=='mdbm-recovery/3.0':
                 digest=item.get('content'); self._blob_path(digest)
                 size=item.get('bytes')

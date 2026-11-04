@@ -730,6 +730,41 @@ def test_stale_inspected_archive_cannot_delete_or_rewrite_newer_work(store,tmp_p
         'newer first','newer sibling']
 
 
+@pytest.mark.parametrize('operation',['write','partial_replacement'])
+@pytest.mark.parametrize('duplicate',['identity','path','normalized_path'])
+def test_duplicate_recovery_document_cannot_replace_restorable_snapshot(
+        store,tmp_path,operation,duplicate):
+    """Manifest publication must enforce the same identity/path constraints as Restore."""
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['original unsaved work']))
+    previous=(store.directory/name).read_bytes()
+    previous_blobs={p.name for p in store.directory.glob('content-*.bin')}
+    if operation=='write':
+        candidate=bundle(tmp_path,['new first','new second'])
+    else:
+        candidate=store.read(name)
+        original=dict(candidate['documents'][0])
+        sibling=dict(original,document_id='f'*32,path=str(tmp_path/'sibling.md'))
+        candidate['documents']=[original,sibling]
+    first,second=candidate['documents']
+    if duplicate=='identity':
+        second['document_id']=first['document_id']
+    elif duplicate=='path':
+        second['path']=first['path']
+    else:
+        second['path']=str(tmp_path/'alias'/'..'/'0.md')
+    with pytest.raises(m.MDBMError,match='Duplicate recovery document (identity|path)'):
+        if operation=='write':
+            store.write(name,candidate)
+        else:
+            store.discard_recovery(
+                name,remaining=candidate,
+                expected_metadata=store.recovery_metadata(name,4096))
+    assert (store.directory/name).read_bytes()==previous
+    assert {p.name for p in store.directory.glob('content-*.bin')}==previous_blobs
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='original unsaved work'
+
+
 def test_matching_inspected_archive_still_allows_guarded_partial_discard(store,tmp_path):
     name='recovery-'+('d'*32)+'.json'
     store.write(name,bundle(tmp_path,['chosen','saved sibling']))
