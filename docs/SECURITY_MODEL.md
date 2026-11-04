@@ -38,6 +38,15 @@ byte size or that full-document parsing has constant latency.
 
 Workspace operations reject traversal outside the canonical root and symbolic-link components, including safe-looking links pointing back into the root. `.mdbm` internals are not user mutation targets. Saves use a temporary sibling, fsync, content-fingerprint conflict checks and atomic publication. Creation uses an exclusive no-clobber path. Reads and saves recheck path safety. Unix no-follow file flags are used where available. This is protection against malicious file names, links and ordinary concurrent edits, not a claim of isolation against a hostile process with the same OS account racing directory replacement. Windows junction/reparse behavior requires the native acceptance pass.
 
+On POSIX, workspace document reads open with `O_NONBLOCK` before checking
+that the opened descriptor is a regular file. This prevents an externally
+substituted FIFO from indefinitely blocking the disk worker during Open,
+fingerprint/conflict checks, Move or Save. The regular-file size, fingerprint,
+root and no-follow checks remain in place. Windows retains its native
+reparse-point limitations; no universal hostile-filesystem isolation is
+claimed. Regression tests exercise each affected operation in a subprocess
+with a finite deadline so a failed nonblocking guarantee cannot hang CI.
+
 Local links resolve relative to the active source and must remain within the workspace. Only HTTP, HTTPS and mailto may be handed to a browser, after explicit confirmation; credential-bearing URLs and terminal controls are rejected. No Markdown image is fetched. External links never become shell commands or user-supplied process argument lists; confirmed URLs are passed only to the browser dispatcher.
 
 Recovery files are plaintext, private-permission local data, not encrypted. Treat the workspace account as trusted. Recovery preserves the old disk fingerprint so restoring a snapshot cannot erase a subsequent external edit without conflict confirmation. Malformed or oversized state is ignored with a diagnostic. The state directory may not be a symbolic link. Concurrent state writers are isolated or locked; normal document conflict guards remain in force regardless.
