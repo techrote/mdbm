@@ -687,8 +687,11 @@ def test_conflicting_v3_shared_content_lengths_preserve_snapshot(
     previous=(store.directory/name).read_bytes()
     candidate=store.read(name)  # Deliberately exercise the v3 input path.
     original=candidate['documents'][0]
-    good=dict(original,document_id='a'*32)
-    bad=dict(original,document_id='b'*32,bytes=original['bytes']+1)
+    # Distinct documents may reference the same blob, but must not alias a
+    # recoverable destination path. Exercise length integrity, not path clashes.
+    good=dict(original,document_id='a'*32,path=str(tmp_path/'shared-good.md'))
+    bad=dict(original,document_id='b'*32,path=str(tmp_path/'shared-bad.md'),
+             bytes=original['bytes']+1)
     candidate['documents']=[bad,good] if bad_first else [good,bad]
     with pytest.raises(m.MDBMError,match='Inconsistent recovery content sizes'):
         if operation=='write':
@@ -705,7 +708,9 @@ def test_v3_shared_content_with_consistent_lengths_still_publishes(store,tmp_pat
     name=store.recovery_name
     store.write(name,bundle(tmp_path,['same text']))
     candidate=store.read(name)
-    candidate['documents'].append(dict(candidate['documents'][0],document_id='b'*32))
+    candidate['documents'].append(dict(candidate['documents'][0],
+                                       document_id='b'*32,
+                                       path=str(tmp_path/'shared-sibling.md')))
     store.write(name,candidate)
     assert [doc['text'] for doc in store.read_recovery(name,4096)['documents']]==[
         'same text','same text']
