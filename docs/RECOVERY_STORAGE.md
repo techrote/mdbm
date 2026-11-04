@@ -19,7 +19,7 @@ partial-discard replacement; this prevents an inconsistent manifest from
 replacing a restorable snapshot. Correctly shared content remains deduplicated.
 
 Recovery publication also rejects duplicate document identities and duplicate
-normalized document paths before touching durable manifests or content. Restore
+workspace-normalized document paths (including relative/absolute aliases) before touching durable manifests or content. Restore
 already rejects these ambiguities; accepting them at publication would replace
 a readable snapshot with a bundle that cannot be safely restored.
 
