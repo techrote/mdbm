@@ -93,6 +93,44 @@ def test_unknown_secondary_lease_pid_keeps_reserved_slot(store,tmp_path,unknown_
     assert not (store.directory/name).exists()
 
 
+def test_live_follower_mislabelled_primary_lease_keeps_its_slot(store,tmp_path):
+    # A damaged primary flag must not release an active follower's slot.
+    follower=m.StateStore(store.directory)
+    assert follower.enabled and not follower.owns_lock
+    try:
+        name=follower.recovery_name
+        lease=f'lease-{follower.token}.json'
+        store._write_json(lease,{'pid':os.getpid(),'token':follower.token,'primary':True})
+        assert store.snapshot_live({'owner':{'token':follower.token}})
+        with pytest.raises(m.MDBMError,match='reserved this recovery slot'):
+            store.write(name,bundle(tmp_path,['unexpected first publication']))
+        assert not (store.directory/name).exists()
+        follower.write(name,bundle(tmp_path,['follower unsaved']))
+        original=(store.directory/name).read_bytes()
+        with pytest.raises(m.MDBMError,match='another instance'):
+            store.write(name,bundle(tmp_path,['unexpected replacement']))
+        with pytest.raises(m.MDBMError,match='another instance'):
+            store.discard_recovery(name,expected_metadata=store.recovery_metadata(name,4096))
+        assert (store.directory/name).read_bytes()==original
+    finally:
+        follower.close()
+
+
+def test_dead_primary_marked_lease_still_allows_stale_reclamation(store,tmp_path):
+    dead=subprocess.Popen([sys.executable,'-c','pass'],
+                          stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL)
+    assert dead.wait(timeout=10)==0
+    assert not m._process_alive(dead.pid)
+    token='d'*32
+    name=f'recovery-{token}.json'
+    store._write_json(f'lease-{token}.json',
+                      {'pid':dead.pid,'token':token,'primary':True})
+    assert not store.snapshot_live({'owner':{'token':token}})
+    store.write(name,bundle(tmp_path,['retained from dead predecessor']))
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='retained from dead predecessor'
+
+
 def test_unreadable_foreign_lease_keeps_valid_snapshot_protected(store,tmp_path):
     follower=m.StateStore(store.directory)
     assert follower.enabled and not follower.owns_lock

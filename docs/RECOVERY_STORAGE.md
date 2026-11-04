@@ -151,7 +151,12 @@ and treats filesystem metadata/permission errors as unknown ownership rather
 than proof of absence. The same fail-closed check applies to
 explicit removal of a damaged foreign archive. Only a demonstrably dead
 valid process PID or an actually removed lease permits that reclamation;
-invalid/unknown PIDs are preserved conservatively.
+invalid/unknown PIDs are preserved conservatively. A lease's `primary`
+flag is not independent proof that its process exited: a live follower whose
+lease is incorrectly marked primary remains protected even when `lock.json`
+names the actual primary. Stale primary-marked leases with a demonstrably dead
+PID remain reclaimable. This conservatively retains some PID-reuse cases rather
+than risk overwriting unsaved text.
 Every manifest/blob
 publication, restore read, removal and garbage collection uses a separate
 `recovery.guard`, serializing these operations across primary and secondary

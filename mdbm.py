@@ -2679,9 +2679,10 @@ class StateStore:
             return True
         if lease.get('token')!=token or type(lease.get('primary')) is not bool:
             return True  # Inconsistent ownership metadata is unverified.
-        if lease['primary']:
-            current=self.read('lock.json',4096)
-            if not isinstance(current,dict) or current.get('token')!=token: return False
+        # A lease claiming to be primary is not proof its process stopped
+        # when lock.json names a different owner. Corruption or a mislabelled
+        # live follower lease must not release the follower's recovery slot.
+        # A genuinely terminated PID remains reclaimable.
         return _process_alive(lease.get('pid'))
 
     def can_modify_recovery(self, name: str, record: Mapping[str,Any]) -> bool:
