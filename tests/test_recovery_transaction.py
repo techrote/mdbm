@@ -772,6 +772,36 @@ def test_duplicate_recovery_document_cannot_replace_restorable_snapshot(
     assert store.read_recovery(name,4096)['documents'][0]['text']=='original unsaved work'
 
 
+
+@pytest.mark.parametrize('operation',['write','partial_replacement'])
+@pytest.mark.parametrize('malformed',['missing_root','invalid_baseline','invalid_path'])
+def test_unrestorable_metadata_cannot_replace_recoverable_snapshot(
+        store,tmp_path,operation,malformed):
+    """The direct writer must not publish content that Restore cannot hydrate."""
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['original unsaved text']))
+    original=(store.directory/name).read_bytes()
+    previous_blobs={p.name for p in store.directory.glob('content-*.bin')}
+    candidate=(bundle(tmp_path,['new unsaved text']) if operation=='write'
+               else store.read(name))
+    if malformed=='missing_root':
+        candidate['root']=None
+    elif malformed=='invalid_baseline':
+        candidate['documents'][0]['baseline']='not-a-sha256'
+    else:
+        candidate['documents'][0]['path']=123
+    with pytest.raises(m.MDBMError,match='Invalid recovery (workspace root|document baseline|document path)'):
+        if operation=='write':
+            store.write(name,candidate)
+        else:
+            store.discard_recovery(
+                name,remaining=candidate,
+                expected_metadata=store.recovery_metadata(name,4096))
+    assert (store.directory/name).read_bytes()==original
+    assert {p.name for p in store.directory.glob('content-*.bin')}==previous_blobs
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='original unsaved text'
+
+
 def test_matching_inspected_archive_still_allows_guarded_partial_discard(store,tmp_path):
     name='recovery-'+('d'*32)+'.json'
     store.write(name,bundle(tmp_path,['chosen','saved sibling']))

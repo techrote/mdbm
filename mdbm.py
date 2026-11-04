@@ -2793,7 +2793,11 @@ class StateStore:
         seen_ids:set[str]=set()
         seen_paths:set[str]=set()
         root=value.get('root')
-        root_base=os.path.abspath(root) if isinstance(root,str) else os.getcwd()
+        # An absent/invalid workspace cannot be restored, and must not
+        # replace an already recoverable archive via the direct state API.
+        if not isinstance(root,str) or not root.strip():
+            raise MDBMError('Invalid recovery workspace root; previous snapshot retained.')
+        root_base=os.path.abspath(root)
         fields={'document_id','path','text','digest','baseline','fingerprint','cursor','anchor',
                 'newline','bom','memories','contents_collapsed','content','bytes'}
         for item in sources:
@@ -2801,6 +2805,15 @@ class StateStore:
             if schema=='mdbm-recovery/1.0':
                 item={k:v for k,v in item.items() if k not in ('schema','root','timestamp')}
             if set(item)-fields: raise MDBMError('Unsupported recovery document metadata.')
+            # Validate the minimum metadata needed to hydrate a document
+            # *before* replacing its saved recovery manifest. Both legacy and
+            # v3 partial publications must meet the same Restore contract.
+            baseline=item.get('baseline')
+            if not isinstance(baseline,str) or not re.fullmatch('[0-9a-f]{64}',baseline):
+                raise MDBMError('Invalid recovery document baseline; previous snapshot retained.')
+            path=item.get('path')
+            if path is not None and not isinstance(path,str):
+                raise MDBMError('Invalid recovery document path; previous snapshot retained.')
             # Restore refuses duplicated live buffer identities/paths. Enforce
             # that same invariant before any durable manifest can replace
             # the previous recoverable snapshot (also for v3 partial writes).

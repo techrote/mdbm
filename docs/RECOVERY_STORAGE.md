@@ -23,6 +23,14 @@ workspace-normalized document paths (including relative/absolute aliases) before
 already rejects these ambiguities; accepting them at publication would replace
 a readable snapshot with a bundle that cannot be safely restored.
 
+For both ordinary publication and selected-document replacement, the writer
+also rejects a missing or non-string workspace root, malformed per-document
+baseline SHA-256, or a document path that is neither text nor null. These are
+minimum Restore preconditions: accepting them into a new manifest would replace
+recoverable unsaved work with an archive that Restore cannot hydrate. Rejections
+leave the previous manifest and its content references unchanged. This is not
+a substitute for Restore's rooted-filesystem and fingerprint checks.
+
 The writer and reader enforce the same limits: at most 32 documents, each
 within the configured `application.max_file_mib` UTF-8 byte budget, and a
 manifest no larger than 16 MiB. Text no longer expands into ASCII-escaped JSON
