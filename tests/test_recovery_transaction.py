@@ -731,7 +731,7 @@ def test_stale_inspected_archive_cannot_delete_or_rewrite_newer_work(store,tmp_p
 
 
 @pytest.mark.parametrize('operation',['write','partial_replacement'])
-@pytest.mark.parametrize('duplicate',['identity','path','normalized_path'])
+@pytest.mark.parametrize('duplicate',['identity','path','normalized_path','relative_path'])
 def test_duplicate_recovery_document_cannot_replace_restorable_snapshot(
         store,tmp_path,operation,duplicate):
     """Manifest publication must enforce the same identity/path constraints as Restore."""
@@ -751,6 +751,8 @@ def test_duplicate_recovery_document_cannot_replace_restorable_snapshot(
         second['document_id']=first['document_id']
     elif duplicate=='path':
         second['path']=first['path']
+    elif duplicate=='relative_path':
+        second['path']='0.md'
     else:
         second['path']=str(tmp_path/'alias'/'..'/'0.md')
     with pytest.raises(m.MDBMError,match='Duplicate recovery document (identity|path)'):
