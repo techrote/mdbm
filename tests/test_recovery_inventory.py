@@ -132,3 +132,29 @@ def test_recovery_completion_after_closing_cannot_publish_or_consume_archive(tmp
         assert (workspace.store.directory/name).exists()
         assert not (workspace.store.directory/workspace.store.recovery_name).exists()
     finally: workspace.store.close()
+
+
+def test_queued_restore_does_not_replace_buffer_with_newer_archive(tmp_path):
+    """Replacing an archive after confirmation must reject the stale Restore."""
+    workspace=m.Workspace(config(tmp_path),restore=False)
+    try:
+        name='recovery-'+('a'*32)+'.json'
+        workspace.store.write(name,bundle(tmp_path,['inspected unsaved text']))
+        metadata=workspace.store.recovery_metadata(name,workspace.files.max_bytes)
+        original=workspace.doc
+        pending=[]
+        workspace.submit_io=lambda key,work,done: (pending.append((work,done)) or True)
+        workspace._restore_recovery_snapshot(name,metadata,None)
+        assert len(pending)==1
+        workspace.store.write(name,bundle(tmp_path,['newer unsaved text']))
+        newer=(workspace.store.directory/name).read_bytes()
+        work,done=pending.pop()
+        with pytest.raises(m.MDBMError,match='changed since inspection') as failed:
+            work()
+        done(None,failed.value)
+        assert workspace.doc is original
+        assert (workspace.store.directory/name).read_bytes()==newer
+        assert not pending  # No sibling rewrite or consumed-archive continuation.
+        assert workspace.overlays[-1].title=='Recovery operation failed'
+    finally:
+        workspace.store.close()

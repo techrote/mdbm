@@ -2613,10 +2613,16 @@ class StateStore:
         if not self.enabled:
             raise MDBMError('Persistence unavailable; recovery access rejected.')
 
-    def read_recovery(self, name: str, max_bytes: int) -> dict[str,Any]:
+    def read_recovery(self, name: str, max_bytes: int, *,
+                      expected_metadata: Mapping[str,Any] | None = None) -> dict[str,Any]:
         self._require_recovery_enabled()
-        # Readers share the publication guard with deletion and collection.
+        # A Restore intent refers to the revision inspected in the confirmation
+        # dialog, not whatever another instance published before this worker
+        # reached the disk. Keep the comparison and hydration in one guard.
         with StateFileLock(self.directory/'recovery.guard',True):
+            if (expected_metadata is not None and
+                    self._read_recovery(name,max_bytes,True)!=expected_metadata):
+                raise MDBMError('Recovery archive changed since inspection; refresh inventory.')
             return self._read_recovery(name,max_bytes)
 
     def recovery_metadata(self, name: str, max_bytes: int) -> dict[str,Any]:
@@ -4269,7 +4275,7 @@ class Workspace:
                         items=[MenuItem('Reading and checking saved text…',enabled=False)])
         self.push_overlay(loading)
         def prepare() -> tuple[dict[str,Any],tuple[DocumentModel,...]]:
-            record=store.read_recovery(name,files.max_bytes)
+            record=store.read_recovery(name,files.max_bytes,expected_metadata=metadata)
             if record.get('root')!=str(files.root): raise MDBMError('Recovery belongs to a different workspace.')
             records=self._recovery_records(record)
             if not records or len(records)>MAX_OPEN_DOCUMENTS: raise MDBMError('Recovery document set is invalid.')

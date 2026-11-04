@@ -151,6 +151,18 @@ instance's content write and manifest publication. The UI queues these disk
 operations with its persistence worker; only completion handlers mutate live
 workspace state.
 
+A confirmed **Restore** selection is versioned as well as an explicit
+discard: its disk worker compares the previously inspected manifest metadata
+with the current metadata while holding `recovery.guard`, before hydrating
+text or updating any open buffer. If another instance has replaced that
+archive, restore rejects the stale selection; it neither loads the replacement
+nor consumes or rewrites the archive. This applies to v3 and bounded legacy
+v1/v2 snapshots. A matching legacy archive may need a second bounded JSON
+read for metadata verification. The guard covers the read transaction, not the
+subsequent UI scheduling delay; a cooperating writer can still publish a new
+revision *after* the verified read. In that case, subsequent guarded archive
+consumption rechecks its original version and cannot delete the successor.
+
 A live owner's archive is never replaceable by another instance through the
 storage publication API. A secondary instance may update only its own
 lease-token recovery slot; any existing unreadable archive is preserved for

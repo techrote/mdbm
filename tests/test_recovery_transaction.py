@@ -714,3 +714,52 @@ def test_unreadable_discard_refuses_archive_repaired_since_inspection(store,tmp_
         store.discard_recovery(name,allow_invalid=True)
     assert archive.read_bytes()==valid
     assert store.read_recovery(name,4096)['documents'][0]['text']=='newly recovered document'
+
+
+@pytest.mark.parametrize('format_name',['v3','legacy_v2','legacy_v1'])
+def test_restore_read_rejects_archive_replaced_after_inspection(store,tmp_path,format_name):
+    """A queued Restore must not hydrate the successor of an inspected archive."""
+    name='recovery-'+('c'*32)+'.json'
+
+    def publish(text):
+        record=bundle(tmp_path,[text])
+        if format_name=='v3':
+            store.write(name,record)
+        else:
+            if format_name=='legacy_v1':
+                record={**record['documents'][0],'schema':'mdbm-recovery/1.0',
+                        'root':str(tmp_path),'timestamp':record['timestamp']}
+            with m.StateFileLock(store.directory/'recovery.guard',True):
+                store._write_json(name,record)
+
+    publish('original unsaved text')
+    inspected=store.recovery_metadata(name,4096)
+    assert store.read_recovery(name,4096,expected_metadata=inspected)
+    publish('newer unsaved text')
+    newer=(store.directory/name).read_bytes()
+    with pytest.raises(m.MDBMError,match='changed since inspection'):
+        store.read_recovery(name,4096,expected_metadata=inspected)
+    assert (store.directory/name).read_bytes()==newer
+    restored=store.read_recovery(name,4096)
+    assert (restored['text'] if format_name=='legacy_v1' else
+            restored['documents'][0]['text'])=='newer unsaved text'
+
+
+@pytest.mark.parametrize('format_name',['v3','legacy_v2','legacy_v1'])
+def test_restore_read_accepts_matching_archive_revision(store,tmp_path,format_name):
+    name='recovery-'+('c'*32)+'.json'
+    original=bundle(tmp_path,['retained unsaved text'])
+    if format_name=='legacy_v1':
+        original={**original['documents'][0],'schema':'mdbm-recovery/1.0',
+                  'root':str(tmp_path),'timestamp':original['timestamp']}
+    if format_name=='v3':
+        store.write(name,original)
+    else:
+        with m.StateFileLock(store.directory/'recovery.guard',True):
+            store._write_json(name,original)
+    metadata=store.recovery_metadata(name,4096)
+    before=(store.directory/name).read_bytes()
+    restored=store.read_recovery(name,4096,expected_metadata=metadata)
+    assert (restored['text'] if format_name=='legacy_v1' else
+            restored['documents'][0]['text'])=='retained unsaved text'
+    assert (store.directory/name).read_bytes()==before
