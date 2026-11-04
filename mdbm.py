@@ -2212,7 +2212,7 @@ class SafeFiles:
             # A file Move must also retain POSIX permission bits. Otherwise
             # staging via mkstemp silently turns read-only/executable files
             # into 0600 files. Refuse a replaced source inode before staging.
-            source_mode=None
+            source_mode=None; source_times=None
             if os.name=='posix':
                 try: source_stat=src.stat(follow_symlinks=False)
                 except OSError as exc:
@@ -2221,7 +2221,10 @@ class SafeFiles:
                     (source_stat.st_dev,source_stat.st_ino)!=(fp.device,fp.inode)):
                     raise ConflictError('Source changed during move; original preserved.')
                 source_mode=stat.S_IMODE(source_stat.st_mode)
-            self._copy_exact_exclusive(dst,raw,source_mode)
+                # File Move is a copy across filesystems. Retain the source's
+                # observed times instead of publishing a newly dated file.
+                source_times=(source_stat.st_atime_ns,source_stat.st_mtime_ns)
+            self._copy_exact_exclusive(dst,raw,source_mode,source_times)
             if self.fingerprint(src)!=fp:
                 raise ConflictError('Source changed during move; both files retained.')
             self.resolve(src)
@@ -2230,7 +2233,8 @@ class SafeFiles:
             self._sync_dir(src.parent)
         return dst
 
-    def _copy_exact_exclusive(self, dst: Path, raw: bytes, mode: int | None = None) -> None:
+    def _copy_exact_exclusive(self, dst: Path, raw: bytes, mode: int | None = None,
+                              times: tuple[int,int] | None = None) -> None:
         # Stage full bytes before publishing. Writing directly to an O_EXCL
         # destination could expose a partial file if write/fsync failed.
         # The sibling hard link is atomic and refuses a competing destination.
@@ -2242,6 +2246,9 @@ class SafeFiles:
                 # Set mode before publication; fsync includes both content
                 # and permission metadata. chmod failure leaves no dest.
                 if mode is not None: os.fchmod(f.fileno(),mode)
+                # Apply timestamps to the staged inode before syncing it.
+                # A failure leaves the original and final destination intact.
+                if times is not None: os.utime(f.fileno(),ns=times)
                 os.fsync(f.fileno())
             self.resolve(dst)
             try: os.link(tmp,dst)

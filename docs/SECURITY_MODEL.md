@@ -49,13 +49,16 @@ with a finite deadline so a failed nonblocking guarantee cannot hang CI.
 
 File Move stages the exact original bytes in a synced temporary sibling before
 an exclusive hard-link publication. On POSIX, the staging inode also receives
-the source's permission bits (including read-only and executable modes) before
-fsync and publication. A failed chmod, write or publication leaves the source
-and any competing destination intact, without exposing an incomplete
-destination; temporary siblings are cleaned up. The source inode is checked
-again before staging its replacement. Windows retains the previous mode
-behavior; ACLs, timestamps and extended attributes are not promised across
-file Moves. A source edit discovered after publication deliberately retains
+the source's permission bits (including read-only and executable modes)
+and its observed access/modification timestamps before fsync and publication.
+The access time is observed after reading and may reflect that read. Failed
+chmod, timestamp setting, write or publication leaves the source and any
+competing destination intact, without exposing an incomplete destination;
+temporary siblings are cleaned up. The source inode is checked again before
+staging its replacement. Windows retains the previous mode and timestamp
+behavior; ACLs and extended attributes are not preserved by this copy-based
+Move. POSIX timestamp preservation requires descriptor-based `utime` support;
+unsupported hosts fail closed rather than publishing a metadata-damaged file. A source edit discovered after publication deliberately retains
 both copies for manual resolution. As with new-file Save, filesystems lacking
 atomic hard-link creation fail closed rather than falling back to an
 overwrite-prone copy.

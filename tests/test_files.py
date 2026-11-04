@@ -164,6 +164,49 @@ def test_move_chmod_failure_preserves_original_and_destination_absence(tmp_path,
     assert not list(tmp_path.glob('.mdbm-save-*'))
 
 
+
+
+@pytest.mark.skipif(os.name!='posix',reason='POSIX descriptor timestamps required')
+def test_move_preserves_source_mtime_and_syncs_timestamps_before_publication(tmp_path,monkeypatch):
+    src=tmp_path/'source.md';dst=tmp_path/'destination.md'
+    src.write_bytes(b'preserve original\\r\\nbytes')
+    os.utime(src,ns=(1_700_000_000_123_456_789,1_690_000_000_123_456_789))
+    original_mtime=src.stat().st_mtime_ns
+    events=[]
+    original_utime=m.os.utime;original_fsync=m.os.fsync
+    def trace_utime(path,*args,**kwargs):
+        if isinstance(path,int): events.append('timestamp')
+        return original_utime(path,*args,**kwargs)
+    def trace_fsync(fd):
+        if stat.S_ISREG(os.fstat(fd).st_mode): events.append('file-sync')
+        return original_fsync(fd)
+    monkeypatch.setattr(m.os,'utime',trace_utime)
+    monkeypatch.setattr(m.os,'fsync',trace_fsync)
+    assert m.SafeFiles(tmp_path).move(src,dst)==dst
+    assert not src.exists()
+    assert dst.read_bytes()==b'preserve original\\r\\nbytes'
+    assert dst.stat().st_mtime_ns==original_mtime
+    assert events.index('timestamp')<events.index('file-sync')
+    assert not list(tmp_path.glob('.mdbm-save-*'))
+
+
+@pytest.mark.skipif(os.name!='posix',reason='POSIX descriptor timestamps required')
+def test_move_timestamp_failure_preserves_source_and_no_destination(tmp_path,monkeypatch):
+    src=tmp_path/'source.md';dst=tmp_path/'destination.md'
+    src.write_bytes(b'original')
+    original_mtime=src.stat().st_mtime_ns
+    original_utime=m.os.utime
+    def fail_staged_utime(path,*args,**kwargs):
+        if isinstance(path,int): raise OSError('injected staged timestamp failure')
+        return original_utime(path,*args,**kwargs)
+    monkeypatch.setattr(m.os,'utime',fail_staged_utime)
+    with pytest.raises(m.PathError,match='Move copy failed'):
+        m.SafeFiles(tmp_path).move(src,dst)
+    assert src.read_bytes()==b'original'
+    assert src.stat().st_mtime_ns==original_mtime
+    assert not dst.exists()
+    assert not list(tmp_path.glob('.mdbm-save-*'))
+
 def test_move_copy_failure_preserves_source_without_partial_destination(tmp_path,monkeypatch):
     src=tmp_path/'source.md';dst=tmp_path/'destination.md'
     raw=b'original contents\\r\\n';src.write_bytes(raw)
