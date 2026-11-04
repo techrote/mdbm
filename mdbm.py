@@ -4165,15 +4165,31 @@ class Workspace:
             if inventory: self.show_recovery_inventory()
         self._recovery_io(discard,finished)
 
-    def show_recovery_inventory(self, offset: int = 0) -> None:
+    def show_recovery_inventory(self, offset: int = 0,
+                                cursors: tuple[tuple[int,str], ...] = ()) -> None:
         if not self.store:
             self.info('Recovery inventory','Persistence is disabled for this workspace.'); return
         while self.overlays: self.close_overlay()
         overlay=Overlay('picker','Recovery inventory',message='Loading saved snapshots…',
                         items=[MenuItem('Reading recovery metadata…',enabled=False)])
         self.push_overlay(overlay); store=self.store; maximum=self.files.max_bytes
+        offset=max(0,int(offset))
+        # Each menu page carries the last key of preceding pages. Direct
+        # numeric offsets remain supported for compatibility, not concurrency.
+        keyset=(offset==0 or (offset%RECOVERY_PAGE_SIZE==0 and
+                            len(cursors)==offset//RECOVERY_PAGE_SIZE))
+        before=cursors[-1] if cursors and keyset else None
         def read_page() -> dict[str,Any]:
-            page=store.recovery_inventory(max(0,int(offset)))
+            if keyset:
+                # A shrinking aggregate count cannot suppress older pages:
+                # fetch one extra item as a continuation sentinel.
+                page=store.recovery_inventory(0,RECOVERY_PAGE_SIZE+1,before=before)
+                page['has_more']=len(page['entries'])>RECOVERY_PAGE_SIZE
+                page['entries']=page['entries'][:RECOVERY_PAGE_SIZE]
+                page['offset']=offset; page['limit']=RECOVERY_PAGE_SIZE
+            else:
+                page=store.recovery_inventory(offset)
+                page['has_more']=page['offset']+page['limit']<page['total']
             for item in page['entries']:
                 try: item['record']=store.recovery_metadata(item['name'],maximum)
                 except (MDBMError,OSError,UnicodeError,ValueError) as exc: item['error']=display_text(exc)
@@ -4198,14 +4214,27 @@ class Workspace:
                     label=f'{date}  {len(docs)} doc(s) · {size_label} · {state} · '+display_text(record.get('root','unknown'))
                 items.append(MenuItem(label,'recovery.inspect',item['name']))
             if not items: items.append(MenuItem('No recovery snapshots',enabled=False))
-            if page['offset']>0: items.append(MenuItem('Previous page','recovery.inventory',max(0,page['offset']-page['limit'])))
-            if page['offset']+page['limit']<page['total']:
-                items.append(MenuItem('Next page','recovery.inventory',page['offset']+page['limit']))
+            if page['offset']>0:
+                previous=max(0,page['offset']-page['limit'])
+                payload=(previous,cursors[:-1]) if keyset else previous
+                items.append(MenuItem('Previous page','recovery.inventory',payload))
+            if page['has_more'] and page['entries']:
+                following=page['offset']+page['limit']
+                last_entry=page['entries'][-1]
+                anchor=(last_entry['mtime_ns'],last_entry['name'])
+                payload=(following,(*cursors,anchor)) if keyset else following
+                items.append(MenuItem('Next page','recovery.inventory',payload))
             items.append(MenuItem('Reclaim unreferenced recovery content','recovery.cleanup'))
             overlay.items=items
             first=page['offset']+1 if page['entries'] else 0
             last=page['offset']+len(page['entries'])
-            overlay.title=f'Recovery inventory · {first}–{last} of {page["total"]}'
+            if last>page['total']:
+                # Concurrent deletion can invalidate ordinal labels, not the
+                # anchored forward traversal itself.
+                overlay.title=(f'Recovery inventory · page {page["offset"]//page["limit"]+1}'
+                               f' · {len(page["entries"])} shown · {page["total"]} stored')
+            else:
+                overlay.title=f'Recovery inventory · {first}–{last} of {page["total"]}'
             overlay.message=f'{page["bytes"]/1048576:.1f} / {page.get("storage_limit",store.recovery_storage_limit)/1048576:.0f} MiB · Newest first · Enter inspects · Esc closes'
             self.invalidate()
         self._recovery_io(read_page,display,overlay)
@@ -5216,7 +5245,8 @@ class Workspace:
         r.add('file.mkdir','New directory…',lambda p:self.request_text('New directory','new-folder',lambda v:(self.files.mkdir(v),self.refresh_tree())),[],'File')
         r.add('file.rename','Rename / move selected item…',lambda p:self.rename_selected(),['f2'],'File')
         r.add('file.trash','Trash selected item…',lambda p:self.trash_selected(),[],'File')
-        r.add('recovery.inventory','Recovery inventory…',lambda p:self.show_recovery_inventory(int(p or 0)),[],'File')
+        r.add('recovery.inventory','Recovery inventory…',lambda p:self.show_recovery_inventory(
+            *(p if isinstance(p,tuple) and len(p)==2 else (int(p or 0),))),[],'File')
         r.add('recovery.inspect','Inspect recovery snapshot',lambda p:self.inspect_recovery(str(p)),[],'File','Recovery inventory → Enter',False)
         r.add('recovery.cleanup','Reclaim unreferenced recovery content',lambda p:self.cleanup_recovery(),[],'File')
         r.add('file.quit','Quit',lambda p:self.request_quit(),['c-q'],'File')

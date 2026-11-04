@@ -56,10 +56,15 @@ another instance between page reads therefore cannot skip an older candidate.
 An archive created later *above* the cursor is visible on the next startup
 or through the interactive inventory. The legacy `StateStore.recovery_candidates()` compatibility iterator also
 uses the keyset cursor, preventing a concurrent discard from skipping
-complete older archives during a multi-page scan. The interactive
-Previous/Next controls remain positional; if concurrent writers change the
-directory, their pages may shift, but no archive is automatically deleted as a
-consequence.
+complete older archives during a multi-page scan. Interactive **Next page**
+now also carries the last (mtime, filename) key from the preceding page.
+A one-entry lookahead detects remaining older archives independently of the
+current aggregate count, so deletion of newer archives cannot hide older
+recovery material. **Previous page** retains the prior anchor but rereads
+the live directory; this is not a frozen transactional snapshot. Archives
+published above an existing cursor appear after reopening the inventory.
+Direct numeric-offset command calls remain supported for compatibility,
+without concurrent-mutation guarantees. No archive is automatically deleted.
 
 Inspection offers Restore, explicit Discard and Back. A snapshot from another
 workspace explains that its root must be opened to restore it. Unreadable

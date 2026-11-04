@@ -217,3 +217,58 @@ def test_compatibility_candidates_survive_concurrent_newer_archive_removal(tmp_p
         assert any('Ignoring recovery-' in msg for msg in store.diagnostics)
     finally:
         store.close()
+
+
+def test_interactive_inventory_cursor_survives_newer_deletions(tmp_path):
+    """Shrinking the archive count must not skip or hide older pages."""
+    workspace=m.Workspace(config(tmp_path),restore=False)
+    try:
+        directory=workspace.store.directory
+        for index in range(76):
+            path=directory/('recovery-'+f'{index:032x}'+'.json')
+            path.write_bytes(b'{}')
+            os.utime(path,ns=(10**18+index,10**18+index))
+        workspace.show_recovery_inventory()
+        first=workspace.overlays[-1]
+        assert len([x for x in first.items if x.command=='recovery.inspect'])==m.RECOVERY_PAGE_SIZE
+        next_page=next(x for x in first.items if x.label=='Next page')
+        for index in range(46,76):
+            (directory/('recovery-'+f'{index:032x}'+'.json')).unlink()
+        visited=[]
+        for iteration in range(2):
+            workspace.dispatch(next_page.command,next_page.payload)
+            page=workspace.overlays[-1]
+            visited.extend(x.payload for x in page.items if x.command=='recovery.inspect')
+            following=[x for x in page.items if x.label=='Next page']
+            if iteration==0:
+                assert len(following)==1
+                next_page=following[0]
+            else:
+                assert not following
+        assert visited==['recovery-'+f'{index:032x}'+'.json'
+                         for index in range(45,-1,-1)]
+    finally:
+        workspace.store.close()
+
+
+def test_interactive_inventory_newer_addition_does_not_repeat_boundary(tmp_path):
+    workspace=m.Workspace(config(tmp_path),restore=False)
+    try:
+        directory=workspace.store.directory
+        for index in range(28):
+            path=directory/('recovery-'+f'{index:032x}'+'.json')
+            path.write_bytes(b'{}')
+            os.utime(path,ns=(10**18+index,10**18+index))
+        workspace.show_recovery_inventory()
+        first=workspace.overlays[-1]
+        names=[x.payload for x in first.items if x.command=='recovery.inspect']
+        next_page=next(x for x in first.items if x.label=='Next page')
+        newer=directory/('recovery-'+f'{28:032x}'+'.json')
+        newer.write_bytes(b'{}')
+        os.utime(newer,ns=(10**18+28,10**18+28))
+        workspace.dispatch(next_page.command,next_page.payload)
+        older=[x.payload for x in workspace.overlays[-1].items if x.command=='recovery.inspect']
+        assert older==['recovery-'+f'{index:032x}'+'.json' for index in range(3,-1,-1)]
+        assert not set(names).intersection(older)
+    finally:
+        workspace.store.close()
