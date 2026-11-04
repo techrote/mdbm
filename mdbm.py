@@ -2111,8 +2111,11 @@ class SafeFiles:
             mode=stat.S_IMODE(p.stat().st_mode) if current else 0o600
             fd,name=tempfile.mkstemp(prefix='.mdbm-save-',dir=p.parent); tmp=Path(name)
             with os.fdopen(fd,'wb') as f:
-                fd=-1; f.write(raw); f.flush(); os.fsync(f.fileno())
+                fd=-1; f.write(raw); f.flush()
+                # Synchronize permission metadata along with the staged bytes.
+                # A chmod after fsync can leave the published mode non-durable.
                 if hasattr(os,'fchmod'): os.fchmod(f.fileno(),mode)
+                os.fsync(f.fileno())
             self.resolve(p)
             if self.fingerprint(p)!=expected:
                 raise ConflictError('The destination changed during save; original preserved.')

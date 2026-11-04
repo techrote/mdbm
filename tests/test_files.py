@@ -14,6 +14,43 @@ def test_atomic_save_and_conflict(tmp_path):
     current=f.fingerprint(p);f.save(p,'approved',current);assert p.read_text()=='approved'
 
 
+
+@pytest.mark.skipif(os.name!='posix' or not hasattr(os,'fchmod'),reason='POSIX fchmod required')
+def test_atomic_save_syncs_permissions_before_publishing(tmp_path,monkeypatch):
+    p=tmp_path/'saved.md';p.write_bytes(b'original');p.chmod(0o444)
+    files=m.SafeFiles(tmp_path);before=files.fingerprint(p)
+    events=[]
+    original_chmod=m.os.fchmod;original_sync=m.os.fsync
+    def record_chmod(fd,mode):
+        events.append(('chmod',mode))
+        return original_chmod(fd,mode)
+    def record_sync(fd):
+        events.append(('sync',stat.S_ISREG(os.fstat(fd).st_mode)))
+        return original_sync(fd)
+    monkeypatch.setattr(m.os,'fchmod',record_chmod)
+    monkeypatch.setattr(m.os,'fsync',record_sync)
+    files.save(p,'replaced',before)
+    assert events[:2]==[('chmod',0o444),('sync',True)]
+    assert p.read_bytes()==b'replaced'
+    assert stat.S_IMODE(p.stat().st_mode)==0o444
+    assert not list(tmp_path.glob('.mdbm-save-*'))
+
+
+@pytest.mark.skipif(os.name!='posix' or not hasattr(os,'fchmod'),reason='POSIX fchmod required')
+def test_atomic_save_chmod_failure_retains_original(tmp_path,monkeypatch):
+    p=tmp_path/'saved.md';p.write_bytes(b'original');p.chmod(0o444)
+    files=m.SafeFiles(tmp_path);before=files.fingerprint(p)
+    def fail_chmod(_fd,_mode):
+        raise OSError('injected permission metadata failure')
+    monkeypatch.setattr(m.os,'fchmod',fail_chmod)
+    with pytest.raises(m.PathError,match='Save failed'):
+        files.save(p,'replacement',before)
+    assert p.read_bytes()==b'original'
+    assert files.fingerprint(p)==before
+    assert stat.S_IMODE(p.stat().st_mode)==0o444
+    assert not list(tmp_path.glob('.mdbm-save-*'))
+
+
 def test_conflict_during_save(tmp_path,monkeypatch):
     f=m.SafeFiles(tmp_path);p=tmp_path/'one.md';p.write_text('initial');fp=f.fingerprint(p)
     original=f.fingerprint;calls=0
