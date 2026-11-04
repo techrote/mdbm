@@ -2969,6 +2969,11 @@ class StateStore:
         # to bypass the versioned confirmation required by the inventory UI.
         if allow_invalid and expected_unreadable is None:
             raise MDBMError('Unreadable archive discard requires an inspected file revision.')
+        # A readable archive is also a selected revision. A direct API caller
+        # must not bypass the UI's stale-confirmation protection by omitting
+        # inspected metadata, even when it requests only a partial rewrite.
+        if not allow_invalid and expected_metadata is None:
+            raise MDBMError('Readable archive discard requires inspected metadata.')
         with StateFileLock(self.directory/'recovery.guard',True):
             if expected_unreadable is not None:
                 if not allow_invalid:

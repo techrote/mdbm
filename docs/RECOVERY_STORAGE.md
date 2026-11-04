@@ -87,6 +87,16 @@ inventory. An inspected, readable snapshot is also a versioned selection:
 when its metadata changes before the guarded discard or partial replacement,
 MDBM refuses that stale confirmation and retains the newer archive. This
 check occurs while holding `recovery.guard` and before any rewrite or deletion.
+The versioned selection rule also applies to direct storage API calls:
+`discard_recovery` requires `expected_metadata` for **every readable
+archive removal or partial replacement**. Calling without it fails before
+acquiring the publication guard or mutating the snapshot, including when the
+archive is still readable. The caller must inspect metadata and then present
+its confirmation; under `recovery.guard`, the actual archive is compared with
+that inspection. An explicit stale version is rejected even when the archive
+is still owned by the same process. The active recovery writer's ordinary
+`write_recovery`/guarded `write` entry points are unaffected.
+
 The explicit **Discard unreadable snapshot** command binds its confirmation
 to the inspected regular file's device/inode, size, and nanosecond modification
 and change timestamps. The identity is captured with the metadata read while

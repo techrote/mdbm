@@ -146,7 +146,7 @@ def test_unreadable_foreign_lease_keeps_valid_snapshot_protected(store,tmp_path)
         with pytest.raises(m.MDBMError,match='another instance'):
             store.write(name,bundle(tmp_path,['primary overwrite']))
         with pytest.raises(m.MDBMError,match='another instance'):
-            store.discard_recovery(name)
+            store.discard_recovery(name,expected_metadata=store.recovery_metadata(name,4096))
         assert (store.directory/name).read_bytes()==before
     finally:
         follower.close()
@@ -201,7 +201,7 @@ def test_dangling_symlink_lease_is_still_ownership_evidence(store,tmp_path,archi
             store.write(name,bundle(tmp_path,['must not claim follower slot']))
         if archive_state=='valid':
             with pytest.raises(m.MDBMError,match='another instance'):
-                store.discard_recovery(name)
+                store.discard_recovery(name,expected_metadata=store.recovery_metadata(name,4096))
         elif archive_state=='invalid':
             inspected,error,revision=store.inspect_recovery_revision(name,4096)
             assert inspected is None and error and revision is not None
@@ -256,7 +256,8 @@ def test_partial_discard_keeps_guard_held_during_manifest_publication(store,tmp_
         called.append(True)
         return actual_publish(*args,**kwargs)
     monkeypatch.setattr(store,'_publish_recovery_locked',checked_publish)
-    store.discard_recovery(name,dict(original,documents=original['documents'][:1]))
+    store.discard_recovery(name,dict(original,documents=original['documents'][:1]),
+                           expected_metadata=store.recovery_metadata(name,4096))
     assert called==[True]
     result=store.read_recovery(name,4096)
     assert [d['text'] for d in result['documents']]==['retain me']
@@ -273,7 +274,8 @@ def test_failed_partial_publication_preserves_manifest_and_source(store,tmp_path
         return real_write(file_name,encoded)
     monkeypatch.setattr(store,'_write_bytes',fail_manifest)
     with pytest.raises(m.MDBMError,match='Injected manifest failure'):
-        store.discard_recovery(name,dict(record,documents=record['documents'][:1]))
+        store.discard_recovery(name,dict(record,documents=record['documents'][:1]),
+                               expected_metadata=store.recovery_metadata(name,4096))
     assert (store.directory/name).read_bytes()==previous
     assert [d['text'] for d in store.read_recovery(name,4096)['documents']]==['retained','to drop']
 
@@ -481,7 +483,7 @@ def test_fifo_secondary_lease_cannot_stall_recovery_owner_checks(store,tmp_path)
         with pytest.raises(m.MDBMError,match='reserved this recovery slot'):
             store.write(name,bundle(tmp_path,['foreign overwrite']))
         with pytest.raises(m.MDBMError,match='another instance'):
-            store.discard_recovery(name)
+            store.discard_recovery(name,expected_metadata=store.recovery_metadata(name,4096))
         assert archive.read_bytes()==original
         assert stat.S_ISFIFO(lease.lstat().st_mode)
         with m.StateFileLock(store.directory/'recovery.guard'):
@@ -531,14 +533,15 @@ def test_live_follower_slot_cannot_be_discarded_with_damaged_but_parseable_owner
         assert not store.can_modify_recovery(name,record)
         remaining=bundle(tmp_path,['unwanted partial replacement']) if partial else None
         with pytest.raises(m.MDBMError,match='another instance owns'):
-            store.discard_recovery(name,remaining=remaining)
+            store.discard_recovery(name,remaining=remaining,
+                                   expected_metadata=store.recovery_metadata(name,4096))
         assert archive.read_bytes()==original
     finally:
         follower.close()
     # Once the live lease really disappears, the primary may explicitly
     # remove the archival slot; no automatic reclamation was performed.
     assert store.can_modify_recovery(name,record)
-    store.discard_recovery(name)
+    store.discard_recovery(name,expected_metadata=store.recovery_metadata(name,4096))
     assert not archive.exists()
 
 
@@ -697,7 +700,8 @@ def test_conflicting_v3_shared_content_lengths_preserve_snapshot(
         if operation=='write':
             store.write(name,candidate)
         else:
-            store.discard_recovery(name,remaining=candidate)
+            store.discard_recovery(name,remaining=candidate,
+                                   expected_metadata=store.recovery_metadata(name,4096))
     assert (store.directory/name).read_bytes()==previous
     assert [doc['text'] for doc in store.read_recovery(name,4096)['documents']]==[
         'original unsaved work']
@@ -800,6 +804,28 @@ def test_unrestorable_metadata_cannot_replace_recoverable_snapshot(
     assert (store.directory/name).read_bytes()==original
     assert {p.name for p in store.directory.glob('content-*.bin')}==previous_blobs
     assert store.read_recovery(name,4096)['documents'][0]['text']=='original unsaved text'
+
+
+@pytest.mark.parametrize('partial',[False,True])
+def test_unversioned_readable_discard_cannot_consume_successor(store,tmp_path,partial):
+    """A direct caller cannot bypass versioned destructive confirmation."""
+    name='recovery-'+('e'*32)+'.json'
+    store.write(name,bundle(tmp_path,['older unsaved','older second']))
+    inspected=store.recovery_metadata(name,4096)
+    remainder=dict(inspected,documents=inspected['documents'][1:]) if partial else None
+    # The caller's original selection has become stale.
+    store.write(name,bundle(tmp_path,['newer unsaved','newer second']))
+    manifest=(store.directory/name).read_bytes()
+    blobs={p.name:p.read_bytes() for p in store.directory.glob('content-*.bin')}
+    with pytest.raises(m.MDBMError,match='requires inspected metadata'):
+        store.discard_recovery(name,remainder)
+    assert (store.directory/name).read_bytes()==manifest
+    assert {p.name:p.read_bytes() for p in store.directory.glob('content-*.bin')}==blobs
+    with pytest.raises(m.MDBMError,match='changed since inspection'):
+        store.discard_recovery(name,remainder,expected_metadata=inspected)
+    assert (store.directory/name).read_bytes()==manifest
+    assert [d['text'] for d in store.read_recovery(name,4096)['documents']]==[
+        'newer unsaved','newer second']
 
 
 def test_matching_inspected_archive_still_allows_guarded_partial_discard(store,tmp_path):

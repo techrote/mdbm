@@ -99,10 +99,10 @@ def test_shared_content_survives_archive_discard_and_orphans_are_collected(store
     store.write(first,bundle(tmp_path,['shared','first only']))
     store.write(second,bundle(tmp_path,['shared','second only']))
     assert len(list(store.directory.glob('content-*.bin')))==3
-    store.discard_recovery(first)
+    store.discard_recovery(first,expected_metadata=store.recovery_metadata(first,4096))
     assert len(list(store.directory.glob('content-*.bin')))==2
     assert [d['text'] for d in store.read_recovery(second,4096)['documents']]==['shared','second only']
-    store.discard_recovery(second)
+    store.discard_recovery(second,expected_metadata=store.recovery_metadata(second,4096))
     assert not list(store.directory.glob('content-*.bin'))
 
 
@@ -158,11 +158,11 @@ def test_primary_cannot_discard_live_follower_snapshot(store,tmp_path):
         record=store.recovery_metadata(name,4096)
         assert store.snapshot_live(record)
         with pytest.raises(m.MDBMError,match='another instance'):
-            store.discard_recovery(name)
+            store.discard_recovery(name,expected_metadata=store.recovery_metadata(name,4096))
         assert (store.directory/name).exists()
     finally: follower.close()
     assert not store.snapshot_live(record)
-    store.discard_recovery(name)
+    store.discard_recovery(name,expected_metadata=store.recovery_metadata(name,4096))
     assert not (store.directory/name).exists()
 
 
