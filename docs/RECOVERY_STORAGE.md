@@ -128,7 +128,10 @@ process-liveness check. Unknown or inaccessible legacy owners are retained.
 Other instances use their own recovery slots and leases. A *missing*
 tokenized lease permits the owner to treat a foreign archive as stale, but an
 *existing unreadable or inconsistent* lease is not evidence that the process
-exited: the archive remains protected. The same fail-closed check applies to
+exited: the archive remains protected. This includes dangling lease symlinks:
+MDBM checks whether the directory entry exists without following its target,
+and treats filesystem metadata/permission errors as unknown ownership rather
+than proof of absence. The same fail-closed check applies to
 explicit removal of a damaged foreign archive. Only a demonstrably dead
 valid process PID or an actually removed lease permits that reclamation;
 invalid/unknown PIDs are preserved conservatively.

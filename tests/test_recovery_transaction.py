@@ -135,6 +135,61 @@ def test_unreadable_foreign_lease_keeps_corrupt_archive_until_owner_closes(store
     assert not archive.exists()
 
 
+@pytest.mark.skipif(os.name!='posix',reason='POSIX symlink semantics')
+@pytest.mark.parametrize('archive_state',['reserved','valid','invalid'])
+def test_dangling_symlink_lease_is_still_ownership_evidence(store,tmp_path,archive_state):
+    # A tampered lease may remain as a symlink whose target does not exist.
+    # Path.exists() follows it and reports False; the directory entry still
+    # exists and must not be mistaken for a released follower slot.
+    follower=m.StateStore(store.directory)
+    assert follower.enabled and not follower.owns_lock
+    name=follower.recovery_name
+    archive=store.directory/name
+    lease=store.directory/f'lease-{follower.token}.json'
+    try:
+        if archive_state=='valid':
+            follower.write(name,bundle(tmp_path,['follower unsaved']))
+        elif archive_state=='invalid':
+            archive.write_bytes(b'{corrupted follower archive')
+        before=archive.read_bytes() if archive.exists() else None
+        lease.unlink()
+        lease.symlink_to('missing-lease-target.json')
+        assert lease.is_symlink() and not lease.exists()
+        assert store.read(lease.name,4096) is None
+        assert store.snapshot_live({'owner':{'token':follower.token}})
+        with pytest.raises(m.MDBMError,match='reserved this recovery slot'):
+            store.write(name,bundle(tmp_path,['must not claim follower slot']))
+        if archive_state=='valid':
+            with pytest.raises(m.MDBMError,match='another instance'):
+                store.discard_recovery(name)
+        elif archive_state=='invalid':
+            with pytest.raises(m.MDBMError,match='instance is active'):
+                store.discard_recovery(name,allow_invalid=True)
+        assert (archive.read_bytes() if archive.exists() else None)==before
+        with m.StateFileLock(store.directory/'recovery.guard'):
+            pass
+    finally:
+        follower.close()
+
+
+def test_inaccessible_lease_metadata_remains_conservatively_live(store,tmp_path,monkeypatch):
+    # A stat/permission failure is unknown ownership, not absence.
+    token='d'*32
+    name=f'recovery-{token}.json'
+    lease=store.directory/f'lease-{token}.json'
+    actual_lstat=m.Path.lstat
+    def inaccessible(path,*args,**kwargs):
+        if path==lease:
+            raise PermissionError('injected inaccessible lease directory entry')
+        return actual_lstat(path,*args,**kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(m.Path,'lstat',inaccessible)
+        assert store.snapshot_live({'owner':{'token':token}})
+        with pytest.raises(m.MDBMError,match='reserved this recovery slot'):
+            store.write(name,bundle(tmp_path,['do not seize uncertain lease']))
+    assert not (store.directory/name).exists()
+
+
 def test_unreadable_existing_archive_is_not_silently_overwritten(store,tmp_path):
     name='recovery-'+('a'*32)+'.json'
     corrupt=b'{invalid metadata - preserve for inspection'

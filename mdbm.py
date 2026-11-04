@@ -2632,10 +2632,18 @@ class StateStore:
         lease_name='lease-'+token+'.json'
         lease=self.read(lease_name,4096)
         if not isinstance(lease,dict):
-            # Absence proves no lease is held; unreadable *existing* evidence
-            # does not. Preserve the slot rather than treating corruption
-            # as a dead owner. read() reports malformed/oversized JSON as None.
-            return self._path(lease_name).exists()
+            # Only a genuinely absent lease is evidence of a free slot.
+            # Do not use _path() here: its link check raises for a suspect
+            # lease, and Path.exists() follows dangling symlinks. lstat()
+            # sees the directory entry itself, never its target. An I/O
+            # error is likewise not proof that the lease disappeared.
+            try:
+                (self.directory/lease_name).lstat()
+            except FileNotFoundError:
+                return False
+            except OSError:
+                return True
+            return True
         if lease.get('token')!=token or type(lease.get('primary')) is not bool:
             return True  # Inconsistent ownership metadata is unverified.
         if lease['primary']:
