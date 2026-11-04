@@ -2060,6 +2060,10 @@ class SafeFiles:
     def raw_read(self, path: Path) -> tuple[bytes,Fingerprint]:
         path=self.resolve(path)
         flags=os.O_RDONLY | getattr(os,'O_BINARY',0) | getattr(os,'O_NOFOLLOW',0)
+        # FIFO open can block indefinitely before the regular-file fstat check.
+        # A stalled read also stalls its bounded disk worker and shutdown. On
+        # POSIX, open nonblocking first; regular-file reads are unaffected.
+        if os.name=='posix': flags|=getattr(os,'O_NONBLOCK',0)
         try:
             fd=os.open(path,flags)
             with os.fdopen(fd,'rb') as f:
