@@ -66,6 +66,12 @@ published above an existing cursor appear after reopening the inventory.
 Direct numeric-offset command calls remain supported for compatibility,
 without concurrent-mutation guarantees. No archive is automatically deleted.
 
+Owner-liveness labels are resolved with archive metadata in the queued disk
+worker, never by synchronous lease reads in the overlay renderer. A failed
+owner probe appears as **unknown**, not **saved**; liveness labels are
+advisory snapshots rather than permission to discard. Discard authorization
+is revalidated by the guarded transaction at the time of the operation.
+
 Inspection offers Restore, explicit Discard and Back. A snapshot from another
 workspace explains that its root must be opened to restore it. Unreadable
 archives are visible and can be explicitly discarded by the primary instance;

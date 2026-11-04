@@ -4191,8 +4191,18 @@ class Workspace:
                 page=store.recovery_inventory(offset)
                 page['has_more']=page['offset']+page['limit']<page['total']
             for item in page['entries']:
-                try: item['record']=store.recovery_metadata(item['name'],maximum)
-                except (MDBMError,OSError,UnicodeError,ValueError) as exc: item['error']=display_text(exc)
+                try: record=store.recovery_metadata(item['name'],maximum)
+                except (MDBMError,OSError,UnicodeError,ValueError) as exc:
+                    item['error']=display_text(exc)
+                    continue
+                item['record']=record
+                # Lease reads and PID checks belong to the disk worker, not
+                # the overlay's event-loop completion handler.
+                try: item['live']=store.snapshot_live(record)
+                except (MDBMError,OSError,UnicodeError,ValueError) as exc:
+                    # Never label an unverified owner as safely retired.
+                    item['live']=None
+                    item['error']=display_text(exc)
             return page
         def display(page: dict[str,Any]) -> None:
             if overlay not in self.overlays: return
@@ -4210,7 +4220,8 @@ class Workspace:
                         # Legacy inventory skips text; encoded archive size is
                         # known, while decoded source size is intentionally not.
                         size_label=f'{item["size"]/1024:.1f} KiB JSON'
-                    state='active' if store.snapshot_live(record) else 'saved'
+                    state=('unknown' if item['live'] is None else
+                           'active' if item['live'] else 'saved')
                     label=f'{date}  {len(docs)} doc(s) · {size_label} · {state} · '+display_text(record.get('root','unknown'))
                 items.append(MenuItem(label,'recovery.inspect',item['name']))
             if not items: items.append(MenuItem('No recovery snapshots',enabled=False))

@@ -272,3 +272,51 @@ def test_interactive_inventory_newer_addition_does_not_repeat_boundary(tmp_path)
         assert not set(names).intersection(older)
     finally:
         workspace.store.close()
+
+
+def test_inventory_owner_liveness_is_probed_only_in_disk_worker(tmp_path,monkeypatch):
+    """Rendering a 24-row inventory must not synchronously read owner leases."""
+    workspace=m.Workspace(config(tmp_path),restore=False)
+    try:
+        name='recovery-'+('e'*32)+'.json'
+        workspace.store.write(name,bundle(tmp_path,['unsaved']))
+        tasks=[]
+        workspace.submit_io=lambda key,work,done: tasks.append((work,done)) or True
+        phase='controller'
+        probes=[]
+        def owner_status(record):
+            assert phase=='worker', 'Owner probing must stay off the controller thread'
+            probes.append(record)
+            return True
+        monkeypatch.setattr(workspace.store,'snapshot_live',owner_status)
+        workspace.show_recovery_inventory()
+        assert len(tasks)==1 and not probes
+        work,done=tasks.pop()
+        phase='worker'
+        page=work()
+        assert len(probes)==1 and page['entries'][0]['live'] is True
+        phase='controller'
+        done(page,None)
+        row=next(item for item in workspace.overlays[-1].items
+                 if item.command=='recovery.inspect' and item.payload==name)
+        assert ' · active · ' in row.label
+        assert not tasks
+    finally:
+        workspace.store.close()
+
+
+def test_inventory_unreadable_owner_state_is_not_called_saved(tmp_path,monkeypatch):
+    workspace=m.Workspace(config(tmp_path),restore=False)
+    try:
+        name='recovery-'+('f'*32)+'.json'
+        workspace.store.write(name,bundle(tmp_path,['unsaved']))
+        def inaccessible_owner(record):
+            raise OSError('owner lease inaccessible')
+        monkeypatch.setattr(workspace.store,'snapshot_live',inaccessible_owner)
+        workspace.show_recovery_inventory()
+        row=next(item for item in workspace.overlays[-1].items
+                 if item.command=='recovery.inspect' and item.payload==name)
+        assert ' · unknown · ' in row.label
+        assert ' · saved · ' not in row.label
+    finally:
+        workspace.store.close()
