@@ -74,9 +74,9 @@ This bounded identity check protects cooperating MDBM publications and routine
 external replacements, but is not a cryptographic digest or a guarantee
 against hostile unguarded writers that forge filesystem attributes. Direct
 programmatic invalid-archive deletion without an expected identity remains an
-explicit unversioned operation and must not be used for delayed UI intents. Ordinary programmatic
-discard remains available without a version precondition, for callers that
-intentionally act on the current snapshot under the guard.
+explicit unversioned operation and must not be used for delayed UI intents.
+Callers intentionally acting on the current snapshot under the guard may still
+use that API without a version precondition.
 
 File-specific startup restoration preserves unselected sibling documents.
 The original archive is consumed only after the new recovery publication
