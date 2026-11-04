@@ -2201,6 +2201,11 @@ class SafeFiles:
         if src.is_dir():
             if dst.is_relative_to(src): raise PathError('Cannot move a directory into itself.')
             self._rename_directory_noreplace(src,dst)
+            # A successful rename changes directory entries in both parents.
+            # Sync the destination first, then the removed source entry;
+            # avoid redundant sync when the move stays within one directory.
+            self._sync_dir(dst.parent)
+            if src.parent!=dst.parent: self._sync_dir(src.parent)
         else:
             raw,fp=self.raw_read(src)
             # Exact bytes preserved; no newline normalization during a move.

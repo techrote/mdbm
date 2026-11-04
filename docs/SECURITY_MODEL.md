@@ -68,8 +68,13 @@ Windows uses `os.rename` (which rejects an existing destination). Other
 platforms or filesystems without the required primitive fail closed. This
 protects destination ownership; it does not claim to prevent a hostile
 same-account process replacing the source between validation and rename.
+On a successful directory rename, MDBM also requests directory-entry
+synchronization for the destination parent and, when different, the source
+parent. Same-parent moves request it once. This is best-effort durability:
+`_sync_dir` deliberately tolerates directory-fsync errors on unsupported
+filesystems and cannot promise crash persistence on every platform.
 Regression tests cover both direct publication and an intervening empty
-directory created after the initial check.
+directory created after the initial check, plus both parent-sync paths.
 
 Local links resolve relative to the active source and must remain within the workspace. Only HTTP, HTTPS and mailto may be handed to a browser, after explicit confirmation; credential-bearing URLs and terminal controls are rejected. No Markdown image is fetched. External links never become shell commands or user-supplied process argument lists; confirmed URLs are passed only to the browser dispatcher.
 

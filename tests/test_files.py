@@ -217,6 +217,26 @@ def test_directory_move_atomic_no_replace_and_success(tmp_path):
     assert not src.exists() and (dst/'keep.md').read_text()=='precious'
 
 
+@pytest.mark.parametrize('cross_parent',[False,True])
+def test_directory_move_syncs_affected_parents(tmp_path,monkeypatch,cross_parent):
+    """After no-clobber publication, sync both renamed directory entries."""
+    src_parent=tmp_path/'source-parent';src_parent.mkdir()
+    dst_parent=tmp_path/'destination-parent' if cross_parent else src_parent
+    if cross_parent: dst_parent.mkdir()
+    src=src_parent/'source';src.mkdir();(src/'keep.md').write_text('precious')
+    dst=dst_parent/'destination'
+    synced=[]
+    monkeypatch.setattr(m.SafeFiles,'_sync_dir',staticmethod(synced.append))
+    try:
+        assert m.SafeFiles(tmp_path).move(src,dst)==dst
+    except m.PathError as exc:
+        if 'unavailable' in str(exc): pytest.skip(str(exc))
+        raise
+    assert not src.exists()
+    assert (dst/'keep.md').read_text()=='precious'
+    assert synced==([dst_parent,src_parent] if cross_parent else [src_parent])
+
+
 def test_directory_move_racing_empty_destination_is_not_replaced(tmp_path,monkeypatch):
     f=m.SafeFiles(tmp_path)
     src=tmp_path/'source';src.mkdir();(src/'keep.md').write_text('source data')
