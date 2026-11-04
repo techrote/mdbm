@@ -48,12 +48,17 @@ claimed. Regression tests exercise each affected operation in a subprocess
 with a finite deadline so a failed nonblocking guarantee cannot hang CI.
 
 File Move stages the exact original bytes in a synced temporary sibling before
-an exclusive hard-link publication. A failed write or publication leaves the
-source and any competing destination intact, without exposing an incomplete
-destination; temporary siblings are cleaned up. A source edit discovered after
-publication deliberately retains both copies for manual resolution. As with
-new-file Save, filesystems lacking atomic hard-link creation fail closed rather
-than falling back to an overwrite-prone copy.
+an exclusive hard-link publication. On POSIX, the staging inode also receives
+the source's permission bits (including read-only and executable modes) before
+fsync and publication. A failed chmod, write or publication leaves the source
+and any competing destination intact, without exposing an incomplete
+destination; temporary siblings are cleaned up. The source inode is checked
+again before staging its replacement. Windows retains the previous mode
+behavior; ACLs, timestamps and extended attributes are not promised across
+file Moves. A source edit discovered after publication deliberately retains
+both copies for manual resolution. As with new-file Save, filesystems lacking
+atomic hard-link creation fail closed rather than falling back to an
+overwrite-prone copy.
 
 Directory Move also requires an atomic **no-replace** rename, rather than
 trusting an earlier destination-existence check. A racing empty destination

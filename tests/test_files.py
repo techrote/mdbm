@@ -99,6 +99,34 @@ def test_exact_move_and_no_overwrite(tmp_path):
     assert src.read_text()=='other' and dst.read_bytes()==raw
 
 
+@pytest.mark.skipif(os.name!='posix',reason='POSIX permission bits required')
+@pytest.mark.parametrize('mode',[0o444,0o751])
+def test_move_preserves_posix_permissions(tmp_path,mode):
+    src=tmp_path/'source.md';dst=tmp_path/'destination.md'
+    src.write_bytes(b'original\\r\\nbytes')
+    src.chmod(mode)
+    assert m.SafeFiles(tmp_path).move(src,dst)==dst
+    assert not src.exists()
+    assert dst.read_bytes()==b'original\\r\\nbytes'
+    assert stat.S_IMODE(dst.stat().st_mode)==mode
+    assert not list(tmp_path.glob('.mdbm-save-*'))
+
+
+@pytest.mark.skipif(os.name!='posix',reason='POSIX fchmod required')
+def test_move_chmod_failure_preserves_original_and_destination_absence(tmp_path,monkeypatch):
+    src=tmp_path/'source.md';dst=tmp_path/'destination.md'
+    src.write_bytes(b'untouched');src.chmod(0o444)
+    def fail_chmod(_fd,_mode):
+        raise OSError('injected permission metadata failure')
+    monkeypatch.setattr(m.os,'fchmod',fail_chmod)
+    with pytest.raises(m.PathError,match='Move copy failed'):
+        m.SafeFiles(tmp_path).move(src,dst)
+    assert src.read_bytes()==b'untouched'
+    assert stat.S_IMODE(src.stat().st_mode)==0o444
+    assert not dst.exists()
+    assert not list(tmp_path.glob('.mdbm-save-*'))
+
+
 def test_move_copy_failure_preserves_source_without_partial_destination(tmp_path,monkeypatch):
     src=tmp_path/'source.md';dst=tmp_path/'destination.md'
     raw=b'original contents\\r\\n';src.write_bytes(raw)

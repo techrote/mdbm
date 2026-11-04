@@ -2201,7 +2201,19 @@ class SafeFiles:
         else:
             raw,fp=self.raw_read(src)
             # Exact bytes preserved; no newline normalization during a move.
-            self._copy_exact_exclusive(dst,raw)
+            # A file Move must also retain POSIX permission bits. Otherwise
+            # staging via mkstemp silently turns read-only/executable files
+            # into 0600 files. Refuse a replaced source inode before staging.
+            source_mode=None
+            if os.name=='posix':
+                try: source_stat=src.stat(follow_symlinks=False)
+                except OSError as exc:
+                    raise PathError('Source metadata unavailable during move: '+display_text(exc)) from None
+                if (not stat.S_ISREG(source_stat.st_mode) or
+                    (source_stat.st_dev,source_stat.st_ino)!=(fp.device,fp.inode)):
+                    raise ConflictError('Source changed during move; original preserved.')
+                source_mode=stat.S_IMODE(source_stat.st_mode)
+            self._copy_exact_exclusive(dst,raw,source_mode)
             if self.fingerprint(src)!=fp:
                 raise ConflictError('Source changed during move; both files retained.')
             self.resolve(src)
@@ -2210,7 +2222,7 @@ class SafeFiles:
             self._sync_dir(src.parent)
         return dst
 
-    def _copy_exact_exclusive(self, dst: Path, raw: bytes) -> None:
+    def _copy_exact_exclusive(self, dst: Path, raw: bytes, mode: int | None = None) -> None:
         # Stage full bytes before publishing. Writing directly to an O_EXCL
         # destination could expose a partial file if write/fsync failed.
         # The sibling hard link is atomic and refuses a competing destination.
@@ -2218,7 +2230,11 @@ class SafeFiles:
         try:
             fd,name=tempfile.mkstemp(prefix='.mdbm-save-',dir=dst.parent); tmp=Path(name)
             with os.fdopen(fd,'wb') as f:
-                fd=-1; f.write(raw); f.flush(); os.fsync(f.fileno())
+                fd=-1; f.write(raw); f.flush()
+                # Set mode before publication; fsync includes both content
+                # and permission metadata. chmod failure leaves no dest.
+                if mode is not None: os.fchmod(f.fileno(),mode)
+                os.fsync(f.fileno())
             self.resolve(dst)
             try: os.link(tmp,dst)
             except FileExistsError: raise ConflictError('Destination already exists.') from None
