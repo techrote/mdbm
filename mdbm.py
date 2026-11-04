@@ -2858,7 +2858,8 @@ class StateStore:
             'cursor':doc.cursor,'anchor':doc.anchor,'newline':doc.newline,'bom':doc.bom,'timestamp':time.time()})
 
     def discard_recovery(self, name: str, remaining: Mapping[str,Any] | None = None,
-                         allow_invalid: bool = False) -> None:
+                         allow_invalid: bool = False, *,
+                         expected_metadata: Mapping[str,Any] | None = None) -> None:
         self._require_recovery_enabled()
         if not _RECOVERY_NAME.fullmatch(name): raise MDBMError('Invalid recovery snapshot name.')
         with StateFileLock(self.directory/'recovery.guard',True):
@@ -2872,6 +2873,14 @@ class StateStore:
                     # damaged archive itself has no readable owner metadata.
                     raise MDBMError('Snapshot retained: its instance is active.')
                 record={}
+            else:
+                # A selection is authority for the version the user inspected,
+                # not for a successor published while the confirmation was open.
+                # This check is inside recovery.guard, before partial rewrite or
+                # deletion. An unreadable-discard intent cannot delete an archive
+                # that has since become readable either.
+                if allow_invalid or (expected_metadata is not None and record != expected_metadata):
+                    raise MDBMError('Recovery archive changed since inspection; refresh inventory.')
             if not self.can_modify_recovery(name,record): raise MDBMError('Snapshot retained: another instance owns it.')
             if remaining is None:
                 self._path(name).unlink(missing_ok=True); self._collect_orphan_blobs(); SafeFiles._sync_dir(self.directory)
@@ -4281,7 +4290,7 @@ class Workspace:
             def consumed() -> None:
                 if getattr(self,'_closing',False) or getattr(self,'_shutting_down',False): return
                 if mutable and self.store is store and self.files is files:
-                    self._recovery_io(lambda:store.discard_recovery(name),lambda value:None)
+                    self._recovery_io(lambda:store.discard_recovery(name,expected_metadata=metadata),lambda value:None)
             def publish(value: Any = None) -> None:
                 if getattr(self,'_closing',False) or getattr(self,'_shutting_down',False): return
                 # Archive consumption must follow the successful durable write,
@@ -4310,7 +4319,7 @@ class Workspace:
                     full=store.read_recovery(name,self.files.max_bytes)
                     remainder=dict(full,documents=[item for item in self._recovery_records(full)
                                    if item.get('path')!=str(active)])
-            store.discard_recovery(name,remainder)
+            store.discard_recovery(name,remainder,expected_metadata=metadata)
         def finished(value: Any) -> None:
             self.status('Recovery selection discarded; source files were not changed.')
             if inventory: self.show_recovery_inventory()

@@ -59,7 +59,15 @@ archives are visible and can be explicitly discarded by the primary instance;
 an invalid archive is never silently treated as an empty snapshot. Live
 snapshots belonging to another instance remain protected. The current
 instance's active write slot is visible but cannot be discarded through the
-inventory.
+inventory. An inspected, readable snapshot is also a versioned selection:
+when its metadata changes before the guarded discard or partial replacement,
+MDBM refuses that stale confirmation and retains the newer archive. This
+check occurs while holding `recovery.guard` and before any rewrite or deletion.
+The explicit **Discard unreadable snapshot** command similarly refuses to
+remove an archive that has become readable since it was inspected; the user
+must refresh the inventory and inspect the new revision. Ordinary programmatic
+discard remains available without a version precondition, for callers that
+intentionally act on the current snapshot under the guard.
 
 File-specific startup restoration preserves unselected sibling documents.
 The original archive is consumed only after the new recovery publication

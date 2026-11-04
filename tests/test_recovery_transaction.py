@@ -668,3 +668,49 @@ def test_v3_shared_content_with_consistent_lengths_still_publishes(store,tmp_pat
     assert [doc['text'] for doc in store.read_recovery(name,4096)['documents']]==[
         'same text','same text']
     assert len(list(store.directory.glob('content-*.bin')))==1
+
+@pytest.mark.parametrize('partial',[False,True])
+def test_stale_inspected_archive_cannot_delete_or_rewrite_newer_work(store,tmp_path,partial):
+    """An inspected selection cannot silently consume a successor's unsaved text."""
+    name='recovery-'+('d'*32)+'.json'
+    store.write(name,bundle(tmp_path,['older first','older sibling']))
+    inspected=store.recovery_metadata(name,4096)
+    remaining=dict(inspected,documents=inspected['documents'][1:]) if partial else None
+
+    # Simulate a cooperating writer publishing a different revision after the
+    # recovery confirmation was displayed, but before the queued discard runs.
+    store.write(name,bundle(tmp_path,['newer first','newer sibling']))
+    newer=(store.directory/name).read_bytes()
+    with pytest.raises(m.MDBMError,match='changed since inspection'):
+        store.discard_recovery(name,remaining,expected_metadata=inspected)
+    assert (store.directory/name).read_bytes()==newer
+    assert [doc['text'] for doc in store.read_recovery(name,4096)['documents']]==[
+        'newer first','newer sibling']
+
+
+def test_matching_inspected_archive_still_allows_guarded_partial_discard(store,tmp_path):
+    name='recovery-'+('d'*32)+'.json'
+    store.write(name,bundle(tmp_path,['chosen','saved sibling']))
+    inspected=store.recovery_metadata(name,4096)
+    remaining=dict(inspected,documents=inspected['documents'][1:])
+    store.discard_recovery(name,remaining,expected_metadata=inspected)
+    assert [doc['text'] for doc in store.read_recovery(name,4096)['documents']]==[
+        'saved sibling']
+
+
+def test_unreadable_discard_refuses_archive_repaired_since_inspection(store,tmp_path):
+    """The explicit 'unreadable archive' action must not delete a new good save."""
+    name='recovery-'+('d'*32)+'.json'
+    archive=store.directory/name
+    archive.write_bytes(b'{broken unreadable archive')
+    with pytest.raises((m.MDBMError,ValueError)):
+        store.recovery_metadata(name,4096)
+    store.write(store.recovery_name,bundle(tmp_path,['newly recovered document']))
+    valid=(store.directory/store.recovery_name).read_bytes()
+    # Another writer repaired this slot between inspection and confirmation.
+    with m.StateFileLock(store.directory/'recovery.guard',True):
+        store._write_bytes(name,valid)
+    with pytest.raises(m.MDBMError,match='changed since inspection'):
+        store.discard_recovery(name,allow_invalid=True)
+    assert archive.read_bytes()==valid
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='newly recovered document'
