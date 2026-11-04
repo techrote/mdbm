@@ -121,9 +121,15 @@ def test_unreadable_archive_prevents_automatic_orphan_deletion(store,tmp_path):
     orphan=store.directory/('content-'+hashlib.sha256(b'orphan').hexdigest()+'.bin')
     orphan.write_bytes(b'orphan')
     bad='recovery-'+uuid.uuid4().hex+'.json'
-    (store.directory/bad).write_text('{broken')
+    archive=store.directory/bad
+    archive.write_text('{broken')
     assert store.collect_recovery_garbage()==0 and orphan.exists()
-    store.discard_recovery(bad,allow_invalid=True)
+    # Corrupt archives must be explicitly inspected before destructive discard;
+    # the selected revision is checked again under recovery.guard.
+    inspected,error,revision=store.inspect_recovery_revision(bad,4096)
+    assert inspected is None and error and revision is not None
+    store.discard_recovery(bad,allow_invalid=True,expected_unreadable=revision)
+    assert not archive.exists()
     assert not orphan.exists()
 
 
