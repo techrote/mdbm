@@ -941,3 +941,76 @@ def test_unreadable_discard_refuses_unversioned_confirmation(store):
     with pytest.raises(m.MDBMError,match='requires an inspected file revision'):
         store.discard_recovery(name,allow_invalid=True)
     assert archive.read_bytes()==replacement
+
+
+@pytest.mark.parametrize('operation',['write','partial'])
+@pytest.mark.parametrize('invalid',[
+    'relative_root','unnormalized_root','outside_absolute','outside_relative',
+    'workspace_root','protected_state','control_character','nul_character',
+])
+def test_publication_preserves_snapshot_on_unrestorable_workspace_path(
+        store,tmp_path,operation,invalid):
+    """A direct API write must not turn a readable archive into an unrestorable one."""
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['recoverable unsaved text']))
+    before_metadata=store.recovery_metadata(name,4096)
+    before_manifest=(store.directory/name).read_bytes()
+    before_blobs={p.name:p.read_bytes() for p in store.directory.glob('content-*.bin')}
+    candidate=bundle(tmp_path,['replacement text'])
+    path=candidate['documents'][0]
+    if invalid=='relative_root':
+        candidate['root']='relative-workspace'
+    elif invalid=='unnormalized_root':
+        candidate['root']=str(tmp_path/'alias'/'..')
+    elif invalid=='outside_absolute':
+        path['path']=str(tmp_path.parent/'outside.md')
+    elif invalid=='outside_relative':
+        path['path']='../outside.md'
+    elif invalid=='workspace_root':
+        path['path']='.'
+    elif invalid=='protected_state':
+        path['path']='.mdbm/recovery.json'
+    elif invalid=='control_character':
+        path['path']='bad'+chr(10)+'name.md'
+    else:
+        path['path']='bad'+chr(0)+'name.md'
+    with pytest.raises(m.MDBMError,match='Invalid recovery (workspace root|document path)'):
+        if operation=='write':
+            store.write(name,candidate)
+        else:
+            store.discard_recovery(name,candidate,expected_metadata=before_metadata)
+    assert (store.directory/name).read_bytes()==before_manifest
+    assert {p.name:p.read_bytes() for p in store.directory.glob('content-*.bin')}==before_blobs
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='recoverable unsaved text'
+
+
+@pytest.mark.parametrize('operation',['write','partial'])
+def test_publication_accepts_valid_relative_path_without_statting_source(
+        store,tmp_path,operation):
+    """A missing workspace file is not grounds to discard dirty recovery."""
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['old text']))
+    metadata=store.recovery_metadata(name,4096)
+    candidate=bundle(tmp_path,['new text'])
+    candidate['documents'][0]['path']='nested/../missing.md'
+    if operation=='write':
+        store.write(name,candidate)
+    else:
+        store.discard_recovery(name,candidate,expected_metadata=metadata)
+    restored=store.read_recovery(name,4096)
+    assert restored['documents'][0]['path']=='nested/../missing.md'
+    assert restored['documents'][0]['text']=='new text'
+
+
+@pytest.mark.skipif(os.name!='nt',reason='Windows reserved device path semantics')
+@pytest.mark.parametrize('candidate_path',['CON.md','subdir/NUL.txt','file.txt:alternate','trailing. '])
+def test_windows_device_paths_cannot_replace_recoverable_snapshot(
+        store,tmp_path,candidate_path):
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['preserved']))
+    previous=(store.directory/name).read_bytes()
+    candidate=bundle(tmp_path,['replacement'])
+    candidate['documents'][0]['path']=candidate_path
+    with pytest.raises(m.MDBMError,match='Invalid recovery document path'):
+        store.write(name,candidate)
+    assert (store.directory/name).read_bytes()==previous

@@ -24,12 +24,19 @@ already rejects these ambiguities; accepting them at publication would replace
 a readable snapshot with a bundle that cannot be safely restored.
 
 For both ordinary publication and selected-document replacement, the writer
-also rejects a missing or non-string workspace root, malformed per-document
-baseline SHA-256, or a document path that is neither text nor null. These are
-minimum Restore preconditions: accepting them into a new manifest would replace
-recoverable unsaved work with an archive that Restore cannot hydrate. Rejections
-leave the previous manifest and its content references unchanged. This is not
-a substitute for Restore's rooted-filesystem and fingerprint checks.
+also rejects a missing, relative or lexically unnormalized workspace root;
+a malformed per-document baseline SHA-256; or a document path that is neither
+text nor null. Non-empty paths must remain lexically within that workspace,
+must name a file rather than the root, and cannot enter protected `.mdbm`
+state or use unsafe control characters (or Windows reserved names/streams).
+These are Restore preconditions: accepting invalid metadata into a new manifest
+could replace recoverable unsaved work with an archive Restore cannot hydrate.
+Rejections leave the previous manifest and its content references unchanged.
+
+Publication does **not** stat or open the document paths: a missing source,
+changed on-disk file or a later symlink substitution must not by itself prevent
+MDBM preserving unsaved buffer text. Restore still performs its separate
+filesystem, symlink/junction and fingerprint checks before applying buffers.
 
 The writer and reader enforce the same limits: at most 32 documents, each
 within the configured `application.max_file_mib` UTF-8 byte budget, and a

@@ -2795,9 +2795,13 @@ class StateStore:
         root=value.get('root')
         # An absent/invalid workspace cannot be restored, and must not
         # replace an already recoverable archive via the direct state API.
-        if not isinstance(root,str) or not root.strip():
+        if (not isinstance(root,str) or not root.strip() or
+                not os.path.isabs(root) or os.path.normpath(root)!=root):
+            # Restore matches the canonical absolute SafeFiles.root exactly.
+            # Relative/unnormalized roots can never be selected there, yet
+            # would otherwise replace an already recoverable snapshot.
             raise MDBMError('Invalid recovery workspace root; previous snapshot retained.')
-        root_base=os.path.abspath(root)
+        root_base=root
         fields={'document_id','path','text','digest','baseline','fingerprint','cursor','anchor',
                 'newline','bom','memories','contents_collapsed','content','bytes'}
         for item in sources:
@@ -2823,10 +2827,26 @@ class StateStore:
                     raise MDBMError('Duplicate recovery document identity; previous snapshot retained.')
                 seen_ids.add(ident)
             path=item.get('path')
-            if isinstance(path,str):
-                # Match SafeFiles.resolve(): relative paths belong to the
-                # recorded workspace, not the current process directory.
-                key=os.path.normcase(os.path.abspath(os.path.join(root_base,path)))
+            if isinstance(path,str) and path:
+                # Match the lexical SafeFiles.resolve() boundary without
+                # opening paths: a changed/missing source must not prevent
+                # preserving dirty text in recovery. Restore will separately
+                # verify symlinks, junctions and actual filesystem state.
+                if any(unsafe_codepoint(ch) for ch in path):
+                    raise MDBMError('Invalid recovery document path; previous snapshot retained.')
+                resolved=Path(os.path.abspath(os.path.join(root_base,path)))
+                try: parts=resolved.relative_to(Path(root_base)).parts
+                except ValueError:
+                    raise MDBMError('Invalid recovery document path; previous snapshot retained.') from None
+                if not parts or any(part.casefold()=='.mdbm' for part in parts):
+                    raise MDBMError('Invalid recovery document path; previous snapshot retained.')
+                if os.name=='nt' and any(
+                        ':' in part or part.rstrip(' .')!=part or
+                        part.split('.')[0].upper() in
+                        {'CON','PRN','AUX','NUL',*(f'COM{i}' for i in range(1,10)),
+                         *(f'LPT{i}' for i in range(1,10))} for part in parts):
+                    raise MDBMError('Invalid recovery document path; previous snapshot retained.')
+                key=os.path.normcase(str(resolved))
                 if key in seen_paths:
                     raise MDBMError('Duplicate recovery document path; previous snapshot retained.')
                 seen_paths.add(key)
