@@ -32,6 +32,10 @@ state or use unsafe control characters (or Windows reserved names/streams).
 These are Restore preconditions: accepting invalid metadata into a new manifest
 could replace recoverable unsaved work with an archive Restore cannot hydrate.
 Rejections leave the previous manifest and its content references unchanged.
+On Windows, original path components are checked *before* OS path
+normalization, which can silently strip trailing dots or spaces from names.
+Such ambiguous spellings are rejected in both ordinary publication and guarded
+partial replacement; an inspected recoverable snapshot is retained.
 
 Publication does **not** stat or open the document paths: a missing source,
 changed on-disk file or a later symlink substitution must not by itself prevent

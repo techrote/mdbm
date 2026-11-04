@@ -2834,6 +2834,16 @@ class StateStore:
                 # verify symlinks, junctions and actual filesystem state.
                 if any(unsafe_codepoint(ch) for ch in path):
                     raise MDBMError('Invalid recovery document path; previous snapshot retained.')
+                if os.name=='nt':
+                    # Win32 path normalization can silently drop trailing dots
+                    # and spaces before resolved.parts is checked. Inspect the
+                    # original components first, retaining "." and ".." as
+                    # legitimate path navigation (bounded below by the root).
+                    tail=os.path.splitdrive(path)[1]
+                    if any(part.rstrip(' .')!=part
+                           for part in re.split(r'[\\/]+',tail)
+                           if part not in ('','.','..')):
+                        raise MDBMError('Invalid recovery document path; previous snapshot retained.')
                 resolved=Path(os.path.abspath(os.path.join(root_base,path)))
                 try: parts=resolved.relative_to(Path(root_base)).parts
                 except ValueError:

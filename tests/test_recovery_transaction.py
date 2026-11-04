@@ -1003,14 +1003,23 @@ def test_publication_accepts_valid_relative_path_without_statting_source(
 
 
 @pytest.mark.skipif(os.name!='nt',reason='Windows reserved device path semantics')
-@pytest.mark.parametrize('candidate_path',['CON.md','subdir/NUL.txt','file.txt:alternate','trailing. '])
+@pytest.mark.parametrize('operation',['write','partial'])
+@pytest.mark.parametrize('candidate_path',[
+    'CON.md','subdir/NUL.txt','file.txt:alternate','trailing. ',
+    'nested./file.md','nested /file.md','file.md.','nested/file.md ',
+])
 def test_windows_device_paths_cannot_replace_recoverable_snapshot(
-        store,tmp_path,candidate_path):
+        store,tmp_path,candidate_path,operation):
     name=store.recovery_name
     store.write(name,bundle(tmp_path,['preserved']))
     previous=(store.directory/name).read_bytes()
+    metadata=store.recovery_metadata(name,4096)
     candidate=bundle(tmp_path,['replacement'])
     candidate['documents'][0]['path']=candidate_path
     with pytest.raises(m.MDBMError,match='Invalid recovery document path'):
-        store.write(name,candidate)
+        if operation=='write':
+            store.write(name,candidate)
+        else:
+            store.discard_recovery(name,candidate,expected_metadata=metadata)
     assert (store.directory/name).read_bytes()==previous
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='preserved'
