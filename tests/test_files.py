@@ -1,4 +1,4 @@
-import asyncio, codecs, dataclasses, hashlib, json, os, sys, time
+import asyncio, codecs, dataclasses, hashlib, json, os, stat, subprocess, sys, time
 from pathlib import Path
 import pytest
 import mdbm as m
@@ -48,6 +48,47 @@ def test_symlink_protection(tmp_path):
     f=m.SafeFiles(tmp_path)
     with pytest.raises(m.PathError):f.load(link/'one.md')
     with pytest.raises(m.PathError):f.save(link/'two.md','x',None)
+
+
+
+@pytest.mark.skipif(os.name!='posix' or not hasattr(os,'mkfifo'),reason='POSIX FIFO required')
+@pytest.mark.parametrize('operation',['load','fingerprint','save','move'])
+def test_fifo_workspace_reads_never_block_disk_operations(tmp_path,operation):
+    """A reader must reject FIFO inodes before a blocking open can stall I/O.
+
+    Run in a child with a hard deadline: if nonblocking open regresses, the
+    test fails instead of hanging the complete CI suite indefinitely.
+    """
+    source=tmp_path/'blocked.md';os.mkfifo(source)
+    script="""
+import sys
+from pathlib import Path
+import mdbm as m
+
+root=Path(sys.argv[1]); operation=sys.argv[2]
+files=m.SafeFiles(root); source=root/'blocked.md'
+try:
+    if operation=='load': files.load(source)
+    elif operation=='fingerprint': files.fingerprint(source)
+    elif operation=='save': files.save(source,'replacement',None)
+    elif operation=='move': files.move(source,root/'copy.md')
+    else: raise AssertionError('Invalid test operation')
+except m.PathError as exc:
+    assert 'Only regular files can be opened.' in str(exc), str(exc)
+else:
+    raise AssertionError('Non-regular workspace source accepted')
+"""
+    try:
+        result=subprocess.run(
+            [sys.executable,'-c',script,str(tmp_path),operation],
+            cwd=Path(__file__).resolve().parents[1],capture_output=True,
+            text=True,timeout=6,check=False)
+    except subprocess.TimeoutExpired:
+        pytest.fail('FIFO operation blocked the disk worker instead of rejecting the inode')
+    assert result.returncode==0, result.stdout+result.stderr
+    assert stat.S_ISFIFO(source.lstat().st_mode)
+    assert not (tmp_path/'copy.md').exists()
+    assert not list(tmp_path.glob('.mdbm-save-*'))
 
 
 def test_exact_move_and_no_overwrite(tmp_path):
