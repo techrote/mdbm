@@ -2815,6 +2815,10 @@ class StateStore:
             baseline=item.get('baseline')
             if not isinstance(baseline,str) or not re.fullmatch('[0-9a-f]{64}',baseline):
                 raise MDBMError('Invalid recovery document baseline; previous snapshot retained.')
+            # Restore constructs a Fingerprint from this record before touching
+            # a live buffer. Validate it here so an unhydratable fingerprint
+            # cannot replace the last readable, unsaved snapshot.
+            fingerprint_from_json(item.get('fingerprint'))
             path=item.get('path')
             if path is not None and not isinstance(path,str):
                 raise MDBMError('Invalid recovery document path; previous snapshot retained.')

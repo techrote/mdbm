@@ -248,6 +248,20 @@ Additional POSIX regressions cover FIFO lease records and owner startup; no
 claim is made that untrusted external processes cannot mutate the state folder.
 
 
+### Fingerprint validation before publication
+
+Every recovery writer, including guarded partial replacement, now applies the
+same optional file-fingerprint structural validation used by Restore.
+Non-null fingerprints require the exact five fields `sha256`, `size`,
+`mtime_ns`, `inode` and `device`, a lowercase 64-hex SHA-256 value,
+and nonnegative **integer** metadata (booleans are not accepted as integers).
+This check happens before blob writes, garbage collection and manifest
+publication. A malformed fingerprint therefore cannot replace a readable
+archive containing unsaved text merely to fail later during Restore. Null
+fingerprints remain supported for unsaved/new files. This is structural
+validation, not a claim that a saved source file still matches the fingerprint;
+the existing file-conflict checks retain that responsibility.
+
 ### Unreadable archive deletion precondition
 
 The storage API now requires the inspected, regular-file revision tuple for

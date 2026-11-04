@@ -1023,3 +1023,60 @@ def test_windows_device_paths_cannot_replace_recoverable_snapshot(
             store.discard_recovery(name,candidate,expected_metadata=metadata)
     assert (store.directory/name).read_bytes()==previous
     assert store.read_recovery(name,4096)['documents'][0]['text']=='preserved'
+
+@pytest.mark.parametrize('operation',['write','partial_replacement'])
+@pytest.mark.parametrize('invalid',[
+    'string','missing_field','wrong_sha','negative_size','bool_size','extra_field',
+])
+def test_malformed_fingerprint_cannot_replace_recoverable_snapshot(
+        store,tmp_path,operation,invalid):
+    """A direct publication must meet the same fingerprint preconditions as Restore."""
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['original unsaved text']))
+    before_metadata=store.recovery_metadata(name,4096)
+    before_manifest=(store.directory/name).read_bytes()
+    before_blobs={p.name:p.read_bytes() for p in store.directory.glob('content-*.bin')}
+    candidate=bundle(tmp_path,['new unsaved text'])
+    fingerprint={'sha256':hashlib.sha256(b'on disk').hexdigest(),
+                 'size':7,'mtime_ns':123,'inode':456,'device':789}
+    if invalid=='string':
+        fingerprint='not a fingerprint'
+    elif invalid=='missing_field':
+        del fingerprint['inode']
+    elif invalid=='wrong_sha':
+        fingerprint['sha256']='broken digest'
+    elif invalid=='negative_size':
+        fingerprint['size']=-1
+    elif invalid=='bool_size':
+        fingerprint['size']=True
+    else:
+        fingerprint['unexpected']=0
+    candidate['documents'][0]['fingerprint']=fingerprint
+    with pytest.raises(m.MDBMError,match='Invalid recovery (fingerprint|digest|metadata)'):
+        if operation=='write':
+            store.write(name,candidate)
+        else:
+            store.discard_recovery(name,candidate,expected_metadata=before_metadata)
+    assert (store.directory/name).read_bytes()==before_manifest
+    assert {p.name:p.read_bytes() for p in store.directory.glob('content-*.bin')}==before_blobs
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='original unsaved text'
+
+
+@pytest.mark.parametrize('operation',['write','partial_replacement'])
+def test_valid_fingerprint_metadata_remains_publishable(store,tmp_path,operation):
+    """Correct file identity metadata remains compatible with v3 hydration."""
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['original unsaved text']))
+    previous_metadata=store.recovery_metadata(name,4096)
+    candidate=bundle(tmp_path,['updated unsaved text'])
+    expected={'sha256':hashlib.sha256(b'on disk').hexdigest(),
+              'size':7,'mtime_ns':123,'inode':456,'device':789}
+    candidate['documents'][0]['fingerprint']=expected
+    if operation=='write':
+        store.write(name,candidate)
+    else:
+        store.discard_recovery(name,candidate,expected_metadata=previous_metadata)
+    restored=store.read_recovery(name,4096)
+    assert restored['documents'][0]['text']=='updated unsaved text'
+    assert restored['documents'][0]['fingerprint']==expected
+    assert m.fingerprint_from_json(restored['documents'][0]['fingerprint'])==m.Fingerprint(**expected)
