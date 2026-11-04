@@ -54,12 +54,18 @@ and its observed access/modification timestamps before fsync and publication.
 The access time is observed after reading and may reflect that read. Failed
 chmod, timestamp setting, write or publication leaves the source and any
 competing destination intact, without exposing an incomplete destination;
-temporary siblings are cleaned up. The source inode is checked again before
-staging its replacement. Windows retains the previous mode and timestamp
+temporary siblings are cleaned up. The source inode is checked before
+staging, and the full source fingerprint is checked again after staging but
+**before** linking a destination. A concurrent edit or deletion during staging
+therefore aborts without publishing an unsolicited stale copy. Windows retains
+the previous mode and timestamp
 behavior; ACLs and extended attributes are not preserved by this copy-based
 Move. POSIX timestamp preservation requires descriptor-based `utime` support;
-unsupported hosts fail closed rather than publishing a metadata-damaged file. A source edit discovered after publication deliberately retains
-both copies for manual resolution. As with new-file Save, filesystems lacking
+unsupported hosts fail closed rather than publishing a metadata-damaged file.
+A source edit in the narrow race window **after the prepublication fingerprint
+check** is detected by the postpublication check, which deliberately retains
+both copies for manual resolution rather than deleting the modified source.
+No cross-process atomic compare-and-delete guarantee is claimed. As with new-file Save, filesystems lacking
 atomic hard-link creation fail closed rather than falling back to an
 overwrite-prone copy.
 

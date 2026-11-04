@@ -2224,7 +2224,7 @@ class SafeFiles:
                 # File Move is a copy across filesystems. Retain the source's
                 # observed times instead of publishing a newly dated file.
                 source_times=(source_stat.st_atime_ns,source_stat.st_mtime_ns)
-            self._copy_exact_exclusive(dst,raw,source_mode,source_times)
+            self._copy_exact_exclusive(dst,raw,source_mode,source_times,source=src,expected=fp)
             if self.fingerprint(src)!=fp:
                 raise ConflictError('Source changed during move; both files retained.')
             self.resolve(src)
@@ -2234,7 +2234,8 @@ class SafeFiles:
         return dst
 
     def _copy_exact_exclusive(self, dst: Path, raw: bytes, mode: int | None = None,
-                              times: tuple[int,int] | None = None) -> None:
+                              times: tuple[int,int] | None = None, *, source: Path | None = None,
+                              expected: Fingerprint | None = None) -> None:
         # Stage full bytes before publishing. Writing directly to an O_EXCL
         # destination could expose a partial file if write/fsync failed.
         # The sibling hard link is atomic and refuses a competing destination.
@@ -2251,6 +2252,12 @@ class SafeFiles:
                 if times is not None: os.utime(f.fileno(),ns=times)
                 os.fsync(f.fileno())
             self.resolve(dst)
+            # A source removed or modified while we staged the destination
+            # must not leave an unsolicited stale copy. Recheck the complete
+            # fingerprint before publishing; the post-link check in move()
+            # still protects the source from changes in the final race window.
+            if source is not None and self.fingerprint(source)!=expected:
+                raise ConflictError('Source changed while staging move; destination not published.')
             try: os.link(tmp,dst)
             except FileExistsError: raise ConflictError('Destination already exists.') from None
             except OSError as exc:

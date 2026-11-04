@@ -207,6 +207,30 @@ def test_move_timestamp_failure_preserves_source_and_no_destination(tmp_path,mon
     assert not dst.exists()
     assert not list(tmp_path.glob('.mdbm-save-*'))
 
+@pytest.mark.parametrize('mutation',['edit','remove'])
+def test_move_source_changed_during_staging_does_not_publish_stale_copy(tmp_path,monkeypatch,mutation):
+    """Even if source changes after staging begins, no stale destination is linked."""
+    src=tmp_path/'source.md';dst=tmp_path/'destination.md'
+    original=b'important original bytes';src.write_bytes(original)
+    sync=m.os.fsync
+    modified=False
+    def edit_after_staging_sync(fd):
+        nonlocal modified
+        sync(fd)
+        if modified or not stat.S_ISREG(os.fstat(fd).st_mode): return
+        modified=True
+        if mutation=='edit': src.write_bytes(b'concurrent external revision')
+        else: src.unlink()
+    monkeypatch.setattr(m.os,'fsync',edit_after_staging_sync)
+    with pytest.raises(m.ConflictError,match='Source changed while staging move'):
+        m.SafeFiles(tmp_path).move(src,dst)
+    assert modified
+    if mutation=='edit': assert src.read_bytes()==b'concurrent external revision'
+    else: assert not src.exists()
+    assert not dst.exists()
+    assert not list(tmp_path.glob('.mdbm-save-*'))
+
+
 def test_move_copy_failure_preserves_source_without_partial_destination(tmp_path,monkeypatch):
     src=tmp_path/'source.md';dst=tmp_path/'destination.md'
     raw=b'original contents\\r\\n';src.write_bytes(raw)
