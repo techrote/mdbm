@@ -47,6 +47,14 @@ reparse-point limitations; no universal hostile-filesystem isolation is
 claimed. Regression tests exercise each affected operation in a subprocess
 with a finite deadline so a failed nonblocking guarantee cannot hang CI.
 
+File Move stages the exact original bytes in a synced temporary sibling before
+an exclusive hard-link publication. A failed write or publication leaves the
+source and any competing destination intact, without exposing an incomplete
+destination; temporary siblings are cleaned up. A source edit discovered after
+publication deliberately retains both copies for manual resolution. As with
+new-file Save, filesystems lacking atomic hard-link creation fail closed rather
+than falling back to an overwrite-prone copy.
+
 Local links resolve relative to the active source and must remain within the workspace. Only HTTP, HTTPS and mailto may be handed to a browser, after explicit confirmation; credential-bearing URLs and terminal controls are rejected. No Markdown image is fetched. External links never become shell commands or user-supplied process argument lists; confirmed URLs are passed only to the browser dispatcher.
 
 Recovery files are plaintext, private-permission local data, not encrypted. Treat the workspace account as trusted. Recovery preserves the old disk fingerprint so restoring a snapshot cannot erase a subsequent external edit without conflict confirmation. Malformed or oversized state is ignored with a diagnostic. The state directory may not be a symbolic link. Concurrent state writers are isolated or locked; normal document conflict guards remain in force regardless.

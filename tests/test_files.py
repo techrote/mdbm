@@ -99,6 +99,36 @@ def test_exact_move_and_no_overwrite(tmp_path):
     assert src.read_text()=='other' and dst.read_bytes()==raw
 
 
+def test_move_copy_failure_preserves_source_without_partial_destination(tmp_path,monkeypatch):
+    src=tmp_path/'source.md';dst=tmp_path/'destination.md'
+    raw=b'original contents\\r\\n';src.write_bytes(raw)
+    def fail_sync(_fd):
+        raise OSError('injected copy synchronization failure')
+    monkeypatch.setattr(m.os,'fsync',fail_sync)
+    with pytest.raises(m.PathError,match='Move copy failed'):
+        m.SafeFiles(tmp_path).move(src,dst)
+    assert src.read_bytes()==raw
+    assert not dst.exists()
+    assert not list(tmp_path.glob('.mdbm-save-*'))
+
+
+def test_move_competing_destination_cannot_be_overwritten(tmp_path,monkeypatch):
+    src=tmp_path/'source.md';dst=tmp_path/'destination.md'
+    raw=b'original contents';src.write_bytes(raw)
+    original_link=m.os.link
+    def competing_link(source,target,*args,**kwargs):
+        if Path(target)==dst:
+            dst.write_bytes(b'other owner')
+            raise FileExistsError('injected competing publisher')
+        return original_link(source,target,*args,**kwargs)
+    monkeypatch.setattr(m.os,'link',competing_link)
+    with pytest.raises(m.ConflictError,match='Destination already exists'):
+        m.SafeFiles(tmp_path).move(src,dst)
+    assert src.read_bytes()==raw
+    assert dst.read_bytes()==b'other owner'
+    assert not list(tmp_path.glob('.mdbm-save-*'))
+
+
 def test_trash_failure_never_deletes(tmp_path,monkeypatch):
     p=tmp_path/'keep.md';p.write_text('keep')
     def reject(_):raise OSError('trash unavailable')

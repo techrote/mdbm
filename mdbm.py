@@ -2168,15 +2168,31 @@ class SafeFiles:
             self.resolve(src)
             try: src.unlink()
             except OSError as exc: raise PathError('Destination copied, but source could not be removed: '+display_text(exc)) from None
+            self._sync_dir(src.parent)
         return dst
 
     def _copy_exact_exclusive(self, dst: Path, raw: bytes) -> None:
-        flags=os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_BINARY',0)|getattr(os,'O_NOFOLLOW',0)
+        # Stage full bytes before publishing. Writing directly to an O_EXCL
+        # destination could expose a partial file if write/fsync failed.
+        # The sibling hard link is atomic and refuses a competing destination.
+        fd=-1; tmp: Path | None=None
         try:
-            fd=os.open(self.resolve(dst),flags,0o600)
-            with os.fdopen(fd,'wb') as f: f.write(raw); f.flush(); os.fsync(f.fileno())
-        except FileExistsError: raise ConflictError('Destination already exists.') from None
-        except OSError as exc: raise PathError(display_text(exc)) from None
+            fd,name=tempfile.mkstemp(prefix='.mdbm-save-',dir=dst.parent); tmp=Path(name)
+            with os.fdopen(fd,'wb') as f:
+                fd=-1; f.write(raw); f.flush(); os.fsync(f.fileno())
+            self.resolve(dst)
+            try: os.link(tmp,dst)
+            except FileExistsError: raise ConflictError('Destination already exists.') from None
+            except OSError as exc:
+                raise PathError('No-clobber atomic move publication is unavailable here: '+display_text(exc)) from None
+            tmp.unlink(); tmp=None
+            self._sync_dir(dst.parent)
+        except OSError as exc:
+            raise PathError('Move copy failed: '+display_text(exc)) from None
+        finally:
+            if fd>=0: os.close(fd)
+            if tmp is not None:
+                with contextlib.suppress(OSError): tmp.unlink()
 
     def trash(self, path: str | Path) -> None:
         p=self.resolve(path)
