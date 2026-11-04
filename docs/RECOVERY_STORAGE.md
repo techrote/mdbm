@@ -224,3 +224,17 @@ manifest. POSIX regressions cover FIFO manifests and content blobs, while
 the ordinary Windows regression and installed-wheel matrix remains required.
 Additional POSIX regressions cover FIFO lease records and owner startup; no
 claim is made that untrusted external processes cannot mutate the state folder.
+
+
+### Unreadable archive deletion precondition
+
+The storage API now requires the inspected, regular-file revision tuple for
+**every** `discard_recovery(..., allow_invalid=True)` operation. Calling it
+without `expected_unreadable` fails before any filesystem mutation, even if
+the current archive is already corrupt. The interactive inventory obtains this
+identity under `recovery.guard` and passes it with explicit discard confirmation.
+The same guard then protects comparison, live-owner checks and unlink. This
+prevents an unchecked programmatic call from deleting a replacement that is
+*also* unreadable. Legacy internal callers must inspect first; there is no
+unversioned destructive fallback. This is an application-level cooperative
+revision check, not a defence against a hostile writer forging inode metadata.

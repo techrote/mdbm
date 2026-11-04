@@ -162,14 +162,16 @@ def test_unreadable_foreign_lease_keeps_corrupt_archive_until_owner_closes(store
         original=b'{damaged recovery metadata'
         archive.write_bytes(original)
         lease.write_bytes(b'{damaged lease metadata')
+        inspected,error,revision=store.inspect_recovery_revision(name,4096)
+        assert inspected is None and error and revision is not None
         with pytest.raises(m.MDBMError,match='instance is active'):
-            store.discard_recovery(name,allow_invalid=True)
+            store.discard_recovery(name,allow_invalid=True,expected_unreadable=revision)
         assert archive.read_bytes()==original
     finally:
         follower.close()
     # Once the follower actually releases/removes its lease, the primary may
-    # explicitly discard the unreadable archive; never delete it automatically.
-    store.discard_recovery(name,allow_invalid=True)
+    # explicitly discard the same inspected unreadable archive; never delete it automatically.
+    store.discard_recovery(name,allow_invalid=True,expected_unreadable=revision)
     assert not archive.exists()
 
 
@@ -201,8 +203,10 @@ def test_dangling_symlink_lease_is_still_ownership_evidence(store,tmp_path,archi
             with pytest.raises(m.MDBMError,match='another instance'):
                 store.discard_recovery(name)
         elif archive_state=='invalid':
+            inspected,error,revision=store.inspect_recovery_revision(name,4096)
+            assert inspected is None and error and revision is not None
             with pytest.raises(m.MDBMError,match='instance is active'):
-                store.discard_recovery(name,allow_invalid=True)
+                store.discard_recovery(name,allow_invalid=True,expected_unreadable=revision)
         assert (archive.read_bytes() if archive.exists() else None)==before
         with m.StateFileLock(store.directory/'recovery.guard'):
             pass
@@ -743,13 +747,15 @@ def test_unreadable_discard_refuses_archive_repaired_since_inspection(store,tmp_
     archive.write_bytes(b'{broken unreadable archive')
     with pytest.raises((m.MDBMError,ValueError)):
         store.recovery_metadata(name,4096)
+    inspected,error,revision=store.inspect_recovery_revision(name,4096)
+    assert inspected is None and error and revision is not None
     store.write(store.recovery_name,bundle(tmp_path,['newly recovered document']))
     valid=(store.directory/store.recovery_name).read_bytes()
     # Another writer repaired this slot between inspection and confirmation.
     with m.StateFileLock(store.directory/'recovery.guard',True):
         store._write_bytes(name,valid)
     with pytest.raises(m.MDBMError,match='changed since inspection'):
-        store.discard_recovery(name,allow_invalid=True)
+        store.discard_recovery(name,allow_invalid=True,expected_unreadable=revision)
     assert archive.read_bytes()==valid
     assert store.read_recovery(name,4096)['documents'][0]['text']=='newly recovered document'
 
@@ -845,3 +851,21 @@ def test_nonregular_unreadable_archive_has_no_discard_identity(store):
     inspected,error,revision=store.inspect_recovery_revision(name,4096)
     assert inspected is None and error and revision is None
     assert stat.S_ISFIFO(archive.lstat().st_mode)
+
+
+def test_unreadable_discard_refuses_unversioned_confirmation(store):
+    """An API caller cannot bypass the inventory's inspected-revision requirement."""
+    name='recovery-'+('d'*32)+'.json'
+    archive=store.directory/name
+    original=b'{old damaged recovery'
+    archive.write_bytes(original)
+    with pytest.raises(m.MDBMError,match='requires an inspected file revision'):
+        store.discard_recovery(name,allow_invalid=True)
+    assert archive.read_bytes()==original
+    # In particular, an unversioned confirmation cannot delete a second
+    # unreadable publication at the same filename.
+    replacement=b'{different damaged recovery publication'
+    archive.write_bytes(replacement)
+    with pytest.raises(m.MDBMError,match='requires an inspected file revision'):
+        store.discard_recovery(name,allow_invalid=True)
+    assert archive.read_bytes()==replacement

@@ -2897,6 +2897,11 @@ class StateStore:
                          expected_unreadable: tuple[int,int,int,int,int] | None = None) -> None:
         self._require_recovery_enabled()
         if not _RECOVERY_NAME.fullmatch(name): raise MDBMError('Invalid recovery snapshot name.')
+        # Deleting a damaged archive is destructive even if another writer
+        # replaces it with a *different damaged archive*. Never allow callers
+        # to bypass the versioned confirmation required by the inventory UI.
+        if allow_invalid and expected_unreadable is None:
+            raise MDBMError('Unreadable archive discard requires an inspected file revision.')
         with StateFileLock(self.directory/'recovery.guard',True):
             if expected_unreadable is not None:
                 if not allow_invalid:
