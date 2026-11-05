@@ -2678,8 +2678,14 @@ class StateStore:
         owner=record.get('owner',{})
         return not self.snapshot_live(record) or (isinstance(owner,dict) and owner.get('token')==self.token)
 
-    def recovery_inventory(self, offset: int = 0, limit: int = RECOVERY_PAGE_SIZE) -> dict[str,Any]:
-        """Stat every archive before newest-first paging; never read text here."""
+    def recovery_inventory(self, offset: int = 0, limit: int = RECOVERY_PAGE_SIZE,
+                           *, before: tuple[int,str] | None = None) -> dict[str,Any]:
+        """Stat every archive before paging; use a stable keyset for startup scans.
+
+        Interactive inventory retains positional paging. A startup discovery
+        cursor avoids skipping a saved archive when another instance removes
+        a newer entry between page reads.
+        """
         offset=max(0,offset); limit=max(1,min(100,limit)); newest=[]; total_bytes=0; total=0
         if not self.enabled: return {'entries':[],'total':0,'bytes':0,'offset':offset,'limit':limit}
         for path in self._snapshot_paths():
@@ -2692,6 +2698,7 @@ class StateStore:
                     total_bytes+=st.st_size
                 total+=1
                 entry=(item['mtime_ns'],item['name'],item)
+                if before is not None and entry[:2]>=before: continue
                 if len(newest)<offset+limit: heapq.heappush(newest,entry)
                 elif entry[:2]>newest[0][:2]: heapq.heapreplace(newest,entry)
             except OSError: continue
@@ -2819,17 +2826,22 @@ class StateStore:
             self._collect_orphan_blobs(); SafeFiles._sync_dir(self.directory)
 
     def recovery_candidates(self, max_bytes: int) -> Iterator[tuple[str,dict[str,Any]]]:
-        """Compatibility iterator; UI inventory uses metadata and lazy reads."""
+        """Compatibility iterator; use keyset paging like startup discovery.
+
+        A concurrent discard must not shift older archives behind a mutable
+        positional offset and silently omit a recoverable buffer.
+        """
         if not self.enabled: return
-        offset=0
+        before: tuple[int,str] | None = None
         while True:
-            page=self.recovery_inventory(offset)
+            page=self.recovery_inventory(before=before)
             for item in page['entries']:
                 try: yield item['name'],self.read_recovery(item['name'],max_bytes)
                 except (OSError,UnicodeError,MDBMError,ValueError) as exc:
                     self.diagnostics.append('Ignoring '+item['name']+': '+display_text(exc))
-            offset+=page['limit']
-            if offset>=page['total']: return
+            if not page['entries']: return
+            last=page['entries'][-1]
+            before=(last['mtime_ns'],last['name'])
 
     def close(self) -> None:
         if self.enabled:
@@ -4142,9 +4154,9 @@ class Workspace:
 
     def _offer_recovery(self, active: Path | None) -> None:
         assert self.store is not None
-        offset=0
+        before: tuple[int,str] | None = None
         while True:
-            page=self.store.recovery_inventory(offset)
+            page=self.store.recovery_inventory(before=before)
             for item in page['entries']:
                 try: record=self.store.recovery_metadata(item['name'],self.files.max_bytes)
                 except (MDBMError,OSError,UnicodeError,ValueError) as exc:
@@ -4153,8 +4165,12 @@ class Workspace:
                 docs=self._recovery_records(record)
                 if not docs or (active is not None and not any(doc.get('path')==str(active) for doc in docs)): continue
                 self._present_recovery(item['name'],record,active); return
-            offset+=page['limit']
-            if offset>=page['total']: return
+            if not page['entries']: return
+            # Move beneath the last observed (mtime, name) pair instead of
+            # advancing a live offset: concurrent cleanup of a newer archive
+            # must not hide the next saved candidate.
+            last=page['entries'][-1]
+            before=(last['mtime_ns'],last['name'])
 
     def _present_recovery(self, name: str, record: Mapping[str,Any], active: Path | None = None,
                           inventory: bool = False) -> None:
@@ -4246,18 +4262,44 @@ class Workspace:
             if inventory: self.show_recovery_inventory()
         self._recovery_io(discard,finished)
 
-    def show_recovery_inventory(self, offset: int = 0) -> None:
+    def show_recovery_inventory(self, offset: int = 0,
+                                cursors: tuple[tuple[int,str], ...] = ()) -> None:
         if not self.store:
             self.info('Recovery inventory','Persistence is disabled for this workspace.'); return
         while self.overlays: self.close_overlay()
         overlay=Overlay('picker','Recovery inventory',message='Loading saved snapshots…',
                         items=[MenuItem('Reading recovery metadata…',enabled=False)])
         self.push_overlay(overlay); store=self.store; maximum=self.files.max_bytes
+        offset=max(0,int(offset))
+        # Each menu page carries the last key of preceding pages. Direct
+        # numeric offsets remain supported for compatibility, not concurrency.
+        keyset=(offset==0 or (offset%RECOVERY_PAGE_SIZE==0 and
+                            len(cursors)==offset//RECOVERY_PAGE_SIZE))
+        before=cursors[-1] if cursors and keyset else None
         def read_page() -> dict[str,Any]:
-            page=store.recovery_inventory(max(0,int(offset)))
+            if keyset:
+                # A shrinking aggregate count cannot suppress older pages:
+                # fetch one extra item as a continuation sentinel.
+                page=store.recovery_inventory(0,RECOVERY_PAGE_SIZE+1,before=before)
+                page['has_more']=len(page['entries'])>RECOVERY_PAGE_SIZE
+                page['entries']=page['entries'][:RECOVERY_PAGE_SIZE]
+                page['offset']=offset; page['limit']=RECOVERY_PAGE_SIZE
+            else:
+                page=store.recovery_inventory(offset)
+                page['has_more']=page['offset']+page['limit']<page['total']
             for item in page['entries']:
-                try: item['record']=store.recovery_metadata(item['name'],maximum)
-                except (MDBMError,OSError,UnicodeError,ValueError) as exc: item['error']=display_text(exc)
+                try: record=store.recovery_metadata(item['name'],maximum)
+                except (MDBMError,OSError,UnicodeError,ValueError) as exc:
+                    item['error']=display_text(exc)
+                    continue
+                item['record']=record
+                # Lease reads and PID checks belong to the disk worker, not
+                # the overlay's event-loop completion handler.
+                try: item['live']=store.snapshot_live(record)
+                except (MDBMError,OSError,UnicodeError,ValueError) as exc:
+                    # Never label an unverified owner as safely retired.
+                    item['live']=None
+                    item['error']=display_text(exc)
             return page
         def display(page: dict[str,Any]) -> None:
             if overlay not in self.overlays: return
@@ -4275,18 +4317,32 @@ class Workspace:
                         # Legacy inventory skips text; encoded archive size is
                         # known, while decoded source size is intentionally not.
                         size_label=f'{item["size"]/1024:.1f} KiB JSON'
-                    state='active' if store.snapshot_live(record) else 'saved'
+                    state=('unknown' if item['live'] is None else
+                           'active' if item['live'] else 'saved')
                     label=f'{date}  {len(docs)} doc(s) · {size_label} · {state} · '+display_text(record.get('root','unknown'))
                 items.append(MenuItem(label,'recovery.inspect',item['name']))
             if not items: items.append(MenuItem('No recovery snapshots',enabled=False))
-            if page['offset']>0: items.append(MenuItem('Previous page','recovery.inventory',max(0,page['offset']-page['limit'])))
-            if page['offset']+page['limit']<page['total']:
-                items.append(MenuItem('Next page','recovery.inventory',page['offset']+page['limit']))
+            if page['offset']>0:
+                previous=max(0,page['offset']-page['limit'])
+                payload=(previous,cursors[:-1]) if keyset else previous
+                items.append(MenuItem('Previous page','recovery.inventory',payload))
+            if page['has_more'] and page['entries']:
+                following=page['offset']+page['limit']
+                last_entry=page['entries'][-1]
+                anchor=(last_entry['mtime_ns'],last_entry['name'])
+                payload=(following,(*cursors,anchor)) if keyset else following
+                items.append(MenuItem('Next page','recovery.inventory',payload))
             items.append(MenuItem('Reclaim unreferenced recovery content','recovery.cleanup'))
             overlay.items=items
             first=page['offset']+1 if page['entries'] else 0
             last=page['offset']+len(page['entries'])
-            overlay.title=f'Recovery inventory · {first}–{last} of {page["total"]}'
+            if last>page['total']:
+                # Concurrent deletion can invalidate ordinal labels, not the
+                # anchored forward traversal itself.
+                overlay.title=(f'Recovery inventory · page {page["offset"]//page["limit"]+1}'
+                               f' · {len(page["entries"])} shown · {page["total"]} stored')
+            else:
+                overlay.title=f'Recovery inventory · {first}–{last} of {page["total"]}'
             overlay.message=f'{page["bytes"]/1048576:.1f} / {page.get("storage_limit",store.recovery_storage_limit)/1048576:.0f} MiB · Newest first · Enter inspects · Esc closes'
             self.invalidate()
         self._recovery_io(read_page,display,overlay)
@@ -5297,7 +5353,8 @@ class Workspace:
         r.add('file.mkdir','New directory…',lambda p:self.request_text('New directory','new-folder',lambda v:(self.files.mkdir(v),self.refresh_tree())),[],'File')
         r.add('file.rename','Rename / move selected item…',lambda p:self.rename_selected(),['f2'],'File')
         r.add('file.trash','Trash selected item…',lambda p:self.trash_selected(),[],'File')
-        r.add('recovery.inventory','Recovery inventory…',lambda p:self.show_recovery_inventory(int(p or 0)),[],'File')
+        r.add('recovery.inventory','Recovery inventory…',lambda p:self.show_recovery_inventory(
+            *(p if isinstance(p,tuple) and len(p)==2 else (int(p or 0),))),[],'File')
         r.add('recovery.inspect','Inspect recovery snapshot',lambda p:self.inspect_recovery(str(p)),[],'File','Recovery inventory → Enter',False)
         r.add('recovery.cleanup','Reclaim unreferenced recovery content',lambda p:self.cleanup_recovery(),[],'File')
         r.add('file.quit','Quit',lambda p:self.request_quit(),['c-q'],'File')

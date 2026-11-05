@@ -132,3 +132,191 @@ def test_recovery_completion_after_closing_cannot_publish_or_consume_archive(tmp
         assert (workspace.store.directory/name).exists()
         assert not (workspace.store.directory/workspace.store.recovery_name).exists()
     finally: workspace.store.close()
+
+
+def test_inventory_keyset_cursor_ties_and_preserves_aggregate_counts(tmp_path):
+    store=m.StateStore(tmp_path/'state')
+    assert store.enabled and store.owns_lock
+    try:
+        names=[]
+        for index in range(29):
+            name='recovery-'+f'{index:032x}'+'.json'
+            path=store.directory/name
+            path.write_bytes(b'{}')
+            os.utime(path,ns=(10**18,10**18))
+            names.append(name)
+        first=store.recovery_inventory()
+        last=first['entries'][-1]
+        second=store.recovery_inventory(before=(last['mtime_ns'],last['name']))
+        observed=[item['name'] for item in first['entries']+second['entries']]
+        assert observed==list(reversed(names))
+        assert first['total']==second['total']==len(names)
+        assert first['bytes']==second['bytes']==2*len(names)
+    finally:
+        store.close()
+
+
+def test_deferred_offer_survives_concurrent_newer_archive_removal(tmp_path,monkeypatch):
+    state=tmp_path/'.mdbm'
+    state.mkdir()
+    source=tmp_path/'0.md'
+    source.write_text('disk')
+    # The sole matching archive begins at old index 24: deleting a newer
+    # entry between offset-based pages used to skip it at index 23.
+    for index in range(50):
+        root=tmp_path if index==25 else tmp_path/'elsewhere'
+        record=bundle(root,[f'unsaved {index}'])
+        path=state/('recovery-'+f'{index:032x}'+'.json')
+        path.write_text(json.dumps(record))
+        os.utime(path,ns=(10**18+index,10**18+index))
+    workspace=m.Workspace(config(tmp_path),source,restore=False)
+    try:
+        original=workspace.store.recovery_inventory
+        scanned=[]
+        def remove_newer_after_first_page(*args,**kwargs):
+            page=original(*args,**kwargs)
+            scanned.append(kwargs.get('before'))
+            if len(scanned)==1:
+                (state/('recovery-'+f'{49:032x}'+'.json')).unlink()
+            return page
+        monkeypatch.setattr(workspace.store,'recovery_inventory',remove_newer_after_first_page)
+        workspace._offer_recovery(source)
+        assert len(scanned)>=2 and scanned[0] is None and scanned[1] is not None
+        assert workspace.overlays[-1].title=='Unsaved recovery found'
+        workspace.overlays[-1].actions[0][1]()
+        assert workspace.doc.text=='unsaved 25'
+        assert source.read_text()=='disk'
+    finally:
+        workspace.store.close()
+
+def test_compatibility_candidates_survive_concurrent_newer_archive_removal(tmp_path,monkeypatch):
+    """A deletion between pages must not skip an older complete legacy bundle."""
+    store=m.StateStore(tmp_path/'state')
+    assert store.enabled and store.owns_lock
+    try:
+        for index in range(50):
+            name='recovery-'+f'{index:032x}'+'.json'
+            path=store.directory/name
+            path.write_text(json.dumps(bundle(tmp_path,[f'unsaved {index}'])))
+            os.utime(path,ns=(10**18+index,10**18+index))
+        original=store.recovery_inventory
+        cursors=[]
+        def discard_after_first_page(*args,**kwargs):
+            page=original(*args,**kwargs)
+            cursors.append(kwargs.get('before'))
+            if len(cursors)==1:
+                (store.directory/('recovery-'+f'{49:032x}'+'.json')).unlink()
+            return page
+        monkeypatch.setattr(store,'recovery_inventory',discard_after_first_page)
+        found=[(name,record['documents'][0]['text'])
+               for name,record in store.recovery_candidates(16*1024*1024)]
+        expected=[('recovery-'+f'{i:032x}'+'.json',f'unsaved {i}')
+                  for i in reversed(range(49))]
+        assert found==expected
+        assert len(cursors)>=3 and cursors[0] is None and cursors[1] is not None
+        assert any('Ignoring recovery-' in msg for msg in store.diagnostics)
+    finally:
+        store.close()
+
+
+def test_interactive_inventory_cursor_survives_newer_deletions(tmp_path):
+    """Shrinking the archive count must not skip or hide older pages."""
+    workspace=m.Workspace(config(tmp_path),restore=False)
+    try:
+        directory=workspace.store.directory
+        for index in range(76):
+            path=directory/('recovery-'+f'{index:032x}'+'.json')
+            path.write_bytes(b'{}')
+            os.utime(path,ns=(10**18+index,10**18+index))
+        workspace.show_recovery_inventory()
+        first=workspace.overlays[-1]
+        assert len([x for x in first.items if x.command=='recovery.inspect'])==m.RECOVERY_PAGE_SIZE
+        next_page=next(x for x in first.items if x.label=='Next page')
+        for index in range(46,76):
+            (directory/('recovery-'+f'{index:032x}'+'.json')).unlink()
+        visited=[]
+        for iteration in range(2):
+            workspace.dispatch(next_page.command,next_page.payload)
+            page=workspace.overlays[-1]
+            visited.extend(x.payload for x in page.items if x.command=='recovery.inspect')
+            following=[x for x in page.items if x.label=='Next page']
+            if iteration==0:
+                assert len(following)==1
+                next_page=following[0]
+            else:
+                assert not following
+        assert visited==['recovery-'+f'{index:032x}'+'.json'
+                         for index in range(45,-1,-1)]
+    finally:
+        workspace.store.close()
+
+
+def test_interactive_inventory_newer_addition_does_not_repeat_boundary(tmp_path):
+    workspace=m.Workspace(config(tmp_path),restore=False)
+    try:
+        directory=workspace.store.directory
+        for index in range(28):
+            path=directory/('recovery-'+f'{index:032x}'+'.json')
+            path.write_bytes(b'{}')
+            os.utime(path,ns=(10**18+index,10**18+index))
+        workspace.show_recovery_inventory()
+        first=workspace.overlays[-1]
+        names=[x.payload for x in first.items if x.command=='recovery.inspect']
+        next_page=next(x for x in first.items if x.label=='Next page')
+        newer=directory/('recovery-'+f'{28:032x}'+'.json')
+        newer.write_bytes(b'{}')
+        os.utime(newer,ns=(10**18+28,10**18+28))
+        workspace.dispatch(next_page.command,next_page.payload)
+        older=[x.payload for x in workspace.overlays[-1].items if x.command=='recovery.inspect']
+        assert older==['recovery-'+f'{index:032x}'+'.json' for index in range(3,-1,-1)]
+        assert not set(names).intersection(older)
+    finally:
+        workspace.store.close()
+
+
+def test_inventory_owner_liveness_is_probed_only_in_disk_worker(tmp_path,monkeypatch):
+    """Rendering a 24-row inventory must not synchronously read owner leases."""
+    workspace=m.Workspace(config(tmp_path),restore=False)
+    try:
+        name='recovery-'+('e'*32)+'.json'
+        workspace.store.write(name,bundle(tmp_path,['unsaved']))
+        tasks=[]
+        workspace.submit_io=lambda key,work,done: tasks.append((work,done)) or True
+        phase='controller'
+        probes=[]
+        def owner_status(record):
+            assert phase=='worker', 'Owner probing must stay off the controller thread'
+            probes.append(record)
+            return True
+        monkeypatch.setattr(workspace.store,'snapshot_live',owner_status)
+        workspace.show_recovery_inventory()
+        assert len(tasks)==1 and not probes
+        work,done=tasks.pop()
+        phase='worker'
+        page=work()
+        assert len(probes)==1 and page['entries'][0]['live'] is True
+        phase='controller'
+        done(page,None)
+        row=next(item for item in workspace.overlays[-1].items
+                 if item.command=='recovery.inspect' and item.payload==name)
+        assert ' · active · ' in row.label
+        assert not tasks
+    finally:
+        workspace.store.close()
+
+
+def test_inventory_unreadable_owner_state_is_not_called_saved(tmp_path,monkeypatch):
+    workspace=m.Workspace(config(tmp_path),restore=False)
+    try:
+        name='recovery-'+('f'*32)+'.json'
+        workspace.store.write(name,bundle(tmp_path,['unsaved']))
+        def inaccessible_owner(record):
+            raise OSError('owner lease inaccessible')
+        monkeypatch.setattr(workspace.store,'snapshot_live',inaccessible_owner)
+        workspace.show_recovery_inventory()
+        row=next(item for item in workspace.overlays[-1].items
+                 if item.command=='recovery.inspect' and item.payload==name)
+        assert ' · unknown · ' in row.label
+        assert ' · saved · ' not in row.label
+    finally:
+        workspace.store.close()

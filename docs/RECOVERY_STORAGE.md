@@ -49,6 +49,29 @@ workspace and live/saved state. Enter and clicking a row use the same inspect
 command. Previous/next page controls remain reachable through the same command
 system.
 
+Startup's deferred-recovery scan uses a newest-first keyset cursor consisting
+of the archive's modification time and filename, rather than repeatedly
+advancing an offset into a changing directory. Removal of a newer archive by
+another instance between page reads therefore cannot skip an older candidate.
+An archive created later *above* the cursor is visible on the next startup
+or through the interactive inventory. The legacy `StateStore.recovery_candidates()` compatibility iterator also
+uses the keyset cursor, preventing a concurrent discard from skipping
+complete older archives during a multi-page scan. Interactive **Next page**
+now also carries the last (mtime, filename) key from the preceding page.
+A one-entry lookahead detects remaining older archives independently of the
+current aggregate count, so deletion of newer archives cannot hide older
+recovery material. **Previous page** retains the prior anchor but rereads
+the live directory; this is not a frozen transactional snapshot. Archives
+published above an existing cursor appear after reopening the inventory.
+Direct numeric-offset command calls remain supported for compatibility,
+without concurrent-mutation guarantees. No archive is automatically deleted.
+
+Owner-liveness labels are resolved with archive metadata in the queued disk
+worker, never by synchronous lease reads in the overlay renderer. A failed
+owner probe appears as **unknown**, not **saved**; liveness labels are
+advisory snapshots rather than permission to discard. Discard authorization
+is revalidated by the guarded transaction at the time of the operation.
+
 Inspection offers Restore, explicit Discard and Back. A snapshot from another
 workspace explains that its root must be opened to restore it. Unreadable
 archives are visible and can be explicitly discarded by the primary instance;
