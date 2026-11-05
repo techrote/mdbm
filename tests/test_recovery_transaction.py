@@ -1141,3 +1141,27 @@ def test_invalid_json_metadata_cannot_replace_recoverable_snapshot(
     assert (store.directory/name).read_bytes()==before_manifest
     assert {p.name:p.read_bytes() for p in store.directory.glob('content-*.bin')}==before_blobs
     assert store.read_recovery(name,4096)['documents'][0]['text']=='preserved unsaved text'
+
+
+@pytest.mark.parametrize('operation',['write','partial_replacement'])
+@pytest.mark.parametrize('suffix',['\x00','\x00missing'])
+def test_embedded_nul_workspace_root_cannot_replace_recoverable_snapshot(
+        store,tmp_path,operation,suffix):
+    """An absolute lexical root containing NUL is not an OS-restorable path."""
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['preserved unsaved text']))
+    before_metadata=store.recovery_metadata(name,4096)
+    before_manifest=(store.directory/name).read_bytes()
+    before_blobs={p.name:p.read_bytes() for p in store.directory.glob('content-*.bin')}
+    candidate=bundle(tmp_path,['replacement unsaved text'])
+    # isabs() and normpath() accept embedded NUL on supported Python
+    # versions; opening the workspace cannot.
+    candidate['root']=str(tmp_path)+suffix
+    with pytest.raises(m.MDBMError,match='Invalid recovery workspace root'):
+        if operation=='write':
+            store.write(name,candidate)
+        else:
+            store.discard_recovery(name,candidate,expected_metadata=before_metadata)
+    assert (store.directory/name).read_bytes()==before_manifest
+    assert {p.name:p.read_bytes() for p in store.directory.glob('content-*.bin')}==before_blobs
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='preserved unsaved text'

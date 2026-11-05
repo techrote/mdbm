@@ -24,7 +24,7 @@ already rejects these ambiguities; accepting them at publication would replace
 a readable snapshot with a bundle that cannot be safely restored.
 
 For both ordinary publication and selected-document replacement, the writer
-also rejects a missing, relative or lexically unnormalized workspace root;
+also rejects a missing, relative, lexically unnormalized or embedded-NUL workspace root;
 a malformed per-document baseline SHA-256; or a document path that is neither
 text nor null. Non-empty paths must remain lexically within that workspace,
 must name a file rather than the root, and cannot enter protected `.mdbm`

@@ -2795,7 +2795,7 @@ class StateStore:
         root=value.get('root')
         # An absent/invalid workspace cannot be restored, and must not
         # replace an already recoverable archive via the direct state API.
-        if (not isinstance(root,str) or not root.strip() or
+        if (not isinstance(root,str) or not root.strip() or '\x00' in root or
                 not os.path.isabs(root) or os.path.normpath(root)!=root):
             # Restore matches the canonical absolute SafeFiles.root exactly.
             # Relative/unnormalized roots can never be selected there, yet
