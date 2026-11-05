@@ -132,3 +132,54 @@ def test_recovery_completion_after_closing_cannot_publish_or_consume_archive(tmp
         assert (workspace.store.directory/name).exists()
         assert not (workspace.store.directory/workspace.store.recovery_name).exists()
     finally: workspace.store.close()
+
+
+def test_queued_restore_does_not_replace_buffer_with_newer_archive(tmp_path):
+    """Replacing an archive after confirmation must reject the stale Restore."""
+    workspace=m.Workspace(config(tmp_path),restore=False)
+    try:
+        name='recovery-'+('a'*32)+'.json'
+        workspace.store.write(name,bundle(tmp_path,['inspected unsaved text']))
+        metadata=workspace.store.recovery_metadata(name,workspace.files.max_bytes)
+        original=workspace.doc
+        pending=[]
+        workspace.submit_io=lambda key,work,done: (pending.append((work,done)) or True)
+        workspace._restore_recovery_snapshot(name,metadata,None)
+        assert len(pending)==1
+        workspace.store.write(name,bundle(tmp_path,['newer unsaved text']))
+        newer=(workspace.store.directory/name).read_bytes()
+        work,done=pending.pop()
+        with pytest.raises(m.MDBMError,match='changed since inspection') as failed:
+            work()
+        done(None,failed.value)
+        assert workspace.doc is original
+        assert (workspace.store.directory/name).read_bytes()==newer
+        assert not pending  # No sibling rewrite or consumed-archive continuation.
+        assert workspace.overlays[-1].title=='Recovery operation failed'
+    finally:
+        workspace.store.close()
+
+
+def test_queued_unreadable_discard_cannot_delete_replaced_malformed_archive(tmp_path):
+    """UI binds the inspected revision, not merely the unreadable filename."""
+    workspace=m.Workspace(config(tmp_path),restore=False)
+    try:
+        name='recovery-'+('d'*32)+'.json'
+        archive=workspace.store.directory/name
+        archive.write_bytes(b'{first broken snapshot')
+        workspace.inspect_recovery(name)
+        confirmation=workspace.overlays[-1]
+        assert confirmation.title=='Unreadable recovery snapshot'
+        discard=next(action for title,action in confirmation.actions
+                     if title=='Discard unreadable snapshot')
+        queued=[]
+        workspace.submit_io=lambda key,work,done: (queued.append((work,done)) or True)
+        discard()
+        assert len(queued)==1
+        archive.write_bytes(b'{new broken snapshot')
+        work,done=queued.pop()
+        with pytest.raises(m.MDBMError,match='changed since inspection'):
+            work()
+        assert archive.read_bytes()==b'{new broken snapshot'
+    finally:
+        workspace.store.close()

@@ -13,6 +13,40 @@ and immutable content references. UTF-8 text is stored in
 The digest and exact byte length are checked on every read. A fresh write can
 repair a corrupt content file when the current buffer provides the matching
 original text.
+During v3 publication, documents sharing a content digest must declare exactly
+the same byte length. Conflicting sizes are rejected before any publication or
+partial-discard replacement; this prevents an inconsistent manifest from
+replacing a restorable snapshot. Correctly shared content remains deduplicated.
+
+Recovery publication also rejects duplicate document identities and duplicate
+workspace-normalized document paths (including relative/absolute aliases) before touching durable manifests or content. Restore
+already rejects these ambiguities; accepting them at publication would replace
+a readable snapshot with a bundle that cannot be safely restored.
+
+For both ordinary publication and selected-document replacement, the writer
+also rejects a missing, relative, lexically unnormalized or embedded-NUL workspace root;
+a malformed per-document baseline SHA-256; or a document path that is neither
+text nor null. Non-empty paths must remain lexically within that workspace,
+must name a file rather than the root, and cannot enter protected `.mdbm`
+state or use unsafe control characters (or Windows reserved names/streams).
+These are Restore preconditions: accepting invalid metadata into a new manifest
+could replace recoverable unsaved work with an archive Restore cannot hydrate.
+Rejections leave the previous manifest and its content references unchanged.
+On Windows, original path components are checked *before* OS path
+normalization, which can silently strip trailing dots or spaces from names.
+Such ambiguous spellings are rejected in both ordinary publication and guarded
+partial replacement; an inspected recoverable snapshot is retained.
+
+Publication does **not** stat or open the document paths: a missing source,
+changed on-disk file or a later symlink substitution must not by itself prevent
+MDBM preserving unsaved buffer text. Restore still performs its separate
+filesystem, symlink/junction and fingerprint checks before applying buffers.
+
+The writer serializes manifests using strict JSON. Non-finite numbers
+(`NaN`, `Infinity`, `-Infinity`), unsupported objects and excessive nesting in
+allowed metadata fields are rejected before touching durable content. This
+applies to ordinary publication and guarded partial replacements alike, so
+invalid metadata cannot replace a recoverable unsaved snapshot.
 
 The writer and reader enforce the same limits: at most 32 documents, each
 within the configured `application.max_file_mib` UTF-8 byte budget, and a
@@ -55,7 +89,32 @@ archives are visible and can be explicitly discarded by the primary instance;
 an invalid archive is never silently treated as an empty snapshot. Live
 snapshots belonging to another instance remain protected. The current
 instance's active write slot is visible but cannot be discarded through the
-inventory.
+inventory. An inspected, readable snapshot is also a versioned selection:
+when its metadata changes before the guarded discard or partial replacement,
+MDBM refuses that stale confirmation and retains the newer archive. This
+check occurs while holding `recovery.guard` and before any rewrite or deletion.
+The versioned selection rule also applies to direct storage API calls:
+`discard_recovery` requires `expected_metadata` for **every readable
+archive removal or partial replacement**. Calling without it fails before
+acquiring the publication guard or mutating the snapshot, including when the
+archive is still readable. The caller must inspect metadata and then present
+its confirmation; under `recovery.guard`, the actual archive is compared with
+that inspection. An explicit stale version is rejected even when the archive
+is still owned by the same process. The active recovery writer's ordinary
+`write_recovery`/guarded `write` entry points are unaffected.
+
+The explicit **Discard unreadable snapshot** command binds its confirmation
+to the inspected regular file's device/inode, size, and nanosecond modification
+and change timestamps. The identity is captured with the metadata read while
+holding `recovery.guard` and compared under that same guard immediately before
+a confirmed deletion. It refuses a replacement even if the successor is also
+unreadable (or has become readable). Missing, inaccessible and non-regular
+entries have no valid destructive confirmation; refresh inventory instead.
+This bounded identity check protects cooperating MDBM publications and routine
+external replacements, but is not a cryptographic digest or a guarantee
+against hostile unguarded writers that forge filesystem attributes. Programmatic invalid-archive deletion also requires that inspected revision;
+there is no unversioned `allow_invalid=True` bypass. Callers must inspect,
+present a confirmation and pass the same identity to guarded deletion.
 
 File-specific startup restoration preserves unselected sibling documents.
 The original archive is consumed only after the new recovery publication
@@ -76,11 +135,26 @@ and content hashes in the disk worker. The completion handler checks the
 current workspace, pending saves, dirty conflicts and capacity before applying
 those prepared models; it does not repeat full-document indexing or hashing.
 
-Unreferenced content is collected while holding the publication guard. If any
-archive cannot be inspected, automatic collection stops conservatively because
-that archive might still reference useful content. Discarding the unreadable
-archive explicitly makes later collection possible. The inventory also exposes
-an explicit **Reclaim unreferenced recovery content** action.
+Unreferenced **regular** content files are collected while holding the
+publication guard. A directory, FIFO, device or symlink that merely has a
+`content-<sha256>.bin`-shaped name is not treated as a deletable blob: it is
+preserved rather than aborting unrelated snapshot publication. A referenced
+non-regular blob remains unreadable and fails closed on restore/publication.
+An unreferenced regular blob that cannot be *unlinked* (for example because
+Windows still has an open file handle) is left in place and continues to
+count toward the storage quota. A deduplicated diagnostic records deferred
+cleanup, but publication may still proceed if the charged bytes fit.
+In contrast, an orphan that cannot even be *statted* aborts publication
+rather than silently undercounting its unknown size. Publication's storage
+accounting is strict even if garbage collection was already suspended by an
+unreadable manifest: inaccessible blob or archive metadata never disappears
+from the quota calculation. An unsafe non-regular archive likewise prevents
+publication until inspected or explicitly removed. The interactive inventory
+remains best-effort so it can still display other archives and diagnostics.
+If any archive cannot be inspected, automatic collection stops conservatively
+because that archive might still reference useful content. Discarding the
+unreadable archive explicitly makes later collection possible. The inventory
+also exposes an explicit **Reclaim unreferenced recovery content** action.
 
 ## Ownership and publication
 
@@ -92,15 +166,127 @@ owner's metadata. Ownership JSON is fully written and flushed before an atomic
 no-clobber hard link publishes it. A crash cannot leave a partially written
 new ownership record.
 
+On POSIX, both kernel guard files are opened with `O_NONBLOCK` and
+`O_NOFOLLOW` before their descriptor types are validated. This avoids
+blocking on an externally substituted FIFO/device at `owner.guard` or
+`recovery.guard` before the regular-file test runs. This flag does **not**
+make requested blocking kernel-lock acquisition nonblocking: lock contention
+still follows the caller's explicit blocking policy. Special-file guards
+fail closed; existing snapshots are not removed. Windows retains descriptor
+validation and its documented path-level reparse-point limitations.
+
 Modern ownership records identify this protocol. Acquiring the unheld kernel
 guard proves a modern owner has gone even if its recorded PID was reused.
 Unversioned legacy records still receive the conservative, non-signalling
 process-liveness check. Unknown or inaccessible legacy owners are retained.
 
-Other instances use their own recovery slots and leases. Every manifest/blob
+Other instances use their own recovery slots and leases. A *missing*
+tokenized lease permits the owner to treat a foreign archive as stale, but an
+*existing unreadable or inconsistent* lease is not evidence that the process
+exited: the archive remains protected. This includes dangling lease symlinks:
+MDBM checks whether the directory entry exists without following its target,
+and treats filesystem metadata/permission errors as unknown ownership rather
+than proof of absence. The same fail-closed check applies to
+explicit removal of a damaged foreign archive. Only a demonstrably dead
+valid process PID or an actually removed lease permits that reclamation;
+invalid/unknown PIDs are preserved conservatively. A lease's `primary`
+flag is not independent proof that its process exited: a live follower whose
+lease is incorrectly marked primary remains protected even when `lock.json`
+names the actual primary. Stale primary-marked leases with a demonstrably dead
+PID remain reclaimable. This conservatively retains some PID-reuse cases rather
+than risk overwriting unsaved text.
+Every manifest/blob
 publication, restore read, removal and garbage collection uses a separate
 `recovery.guard`, serializing these operations across primary and secondary
 instances. This prevents collection from deleting a blob between another
 instance's content write and manifest publication. The UI queues these disk
 operations with its persistence worker; only completion handlers mutate live
 workspace state.
+
+A confirmed **Restore** selection is versioned as well as an explicit
+discard: its disk worker compares the previously inspected manifest metadata
+with the current metadata while holding `recovery.guard`, before hydrating
+text or updating any open buffer. If another instance has replaced that
+archive, restore rejects the stale selection; it neither loads the replacement
+nor consumes or rewrites the archive. This applies to v3 and bounded legacy
+v1/v2 snapshots. A matching legacy archive may need a second bounded JSON
+read for metadata verification. The guard covers the read transaction, not the
+subsequent UI scheduling delay; a cooperating writer can still publish a new
+revision *after* the verified read. In that case, subsequent guarded archive
+consumption rechecks its original version and cannot delete the successor.
+
+A live owner's archive is never replaceable by another instance through the
+storage publication API. A secondary instance may update only its own
+lease-token recovery slot; any existing unreadable archive is preserved for
+explicit inspection rather than silently overwritten. Partial archive
+replacement holds the publication guard from ownership verification through
+manifest publication and orphan collection. Explicit discard and the inventory
+UI's mutability check also honor a live follower lease identified by the
+tokenized archive *filename*, independently of the manifest's owner fields.
+An otherwise parseable archive with missing or inconsistent owner metadata
+cannot be discarded or partially replaced while its original follower is live.
+The primary may explicitly discard it only after that follower's lease is
+demonstrably released. See
+[Recovery transaction continuation](RECOVERY_TRANSACTION_CONTINUATION_2026-11-03.md).
+
+The generic `StateStore.write` entry point also enforces this boundary. Names
+matching `recovery.json` or `recovery-<token>.json` are accepted only with
+supported recovery envelopes; invalid, non-object and future-version payloads
+raise an explicit error without creating or replacing a file. They can never
+fall through to ordinary JSON publication and bypass `recovery.guard` or the
+live-owner check. Only the kernel-lock owner may publish the shared
+`session.json`; secondary instances still read the session and publish their
+own recovery slots, but cannot overwrite the primary's session on disk.
+`lock.json` and tokenized `lease-*.json` records are private to the store
+lifecycle and cannot be written through generic `StateStore.write`, because
+forged owner metadata could make a live recovery archive appear reclaimable.
+The primary's ordinary session writes remain supported.
+
+
+Content-addressed `content-<sha256>.bin` files are likewise excluded from generic
+JSON publication. These bytes can be created or repaired only while publishing
+a validated recovery manifest under `recovery.guard`; an ordinary state write
+cannot corrupt shared text referenced by multiple recovery archives.
+
+Recovery manifest, content and ordinary state-JSON reads validate the
+opened descriptor as a regular file, rather than trusting a path stat before
+opening. This includes `lock.json` during owner startup and tokenized leases
+during recovery-slot ownership checks: a present but unreadable special-file
+lease must still be treated as possibly live, without indefinitely holding
+`recovery.guard`. POSIX opens also use non-blocking and no-follow flags so
+FIFOs/devices and replacement symlinks cannot stall or redirect these reads.
+Windows retains path-level symlink/junction checks and descriptor validation;
+atomic no-follow reparse-point opening is not claimed there. Unsafe material
+fails closed for inspection/publication, without silently replacing the
+manifest. POSIX regressions cover FIFO manifests and content blobs, while
+the ordinary Windows regression and installed-wheel matrix remains required.
+Additional POSIX regressions cover FIFO lease records and owner startup; no
+claim is made that untrusted external processes cannot mutate the state folder.
+
+
+### Fingerprint validation before publication
+
+Every recovery writer, including guarded partial replacement, now applies the
+same optional file-fingerprint structural validation used by Restore.
+Non-null fingerprints require the exact five fields `sha256`, `size`,
+`mtime_ns`, `inode` and `device`, a lowercase 64-hex SHA-256 value,
+and nonnegative **integer** metadata (booleans are not accepted as integers).
+This check happens before blob writes, garbage collection and manifest
+publication. A malformed fingerprint therefore cannot replace a readable
+archive containing unsaved text merely to fail later during Restore. Null
+fingerprints remain supported for unsaved/new files. This is structural
+validation, not a claim that a saved source file still matches the fingerprint;
+the existing file-conflict checks retain that responsibility.
+
+### Unreadable archive deletion precondition
+
+The storage API now requires the inspected, regular-file revision tuple for
+**every** `discard_recovery(..., allow_invalid=True)` operation. Calling it
+without `expected_unreadable` fails before any filesystem mutation, even if
+the current archive is already corrupt. The interactive inventory obtains this
+identity under `recovery.guard` and passes it with explicit discard confirmation.
+The same guard then protects comparison, live-owner checks and unlink. This
+prevents an unchecked programmatic call from deleting a replacement that is
+*also* unreadable. Legacy internal callers must inspect first; there is no
+unversioned destructive fallback. This is an application-level cooperative
+revision check, not a defence against a hostile writer forging inode metadata.

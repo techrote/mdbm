@@ -2244,6 +2244,7 @@ def _process_alive(pid: Any) -> bool:
 RECOVERY_MANIFEST_BYTES = 16 * 1024 * 1024
 RECOVERY_PAGE_SIZE = 24
 _RECOVERY_NAME = re.compile(r'recovery(?:-[0-9a-f]{32})?\.json\Z')
+_STATE_LEASE_NAME = re.compile(r'lease-[0-9a-f]{32}\.json\Z')
 _RECOVERY_BLOB = re.compile(r'content-([0-9a-f]{64})\.bin\Z')
 _JSON_STRING_SPECIAL = re.compile(r'["\\]')
 
@@ -2254,7 +2255,12 @@ class StateFileLock:
         self.fd: int | None=None
         if path.is_symlink() or getattr(path,'is_junction',lambda:False)():
             raise MDBMError('State guards must not be links.')
-        fd=os.open(path,os.O_RDWR|os.O_CREAT|getattr(os,'O_NOFOLLOW',0),0o600)
+        # Guard filenames may be tampered with externally. On POSIX a FIFO
+        # or device must not block *before* fstat can reject its type; this
+        # does not change flock's independent LOCK_NB/blocking semantics.
+        flags=os.O_RDWR|os.O_CREAT|getattr(os,'O_NOFOLLOW',0)
+        if os.name=='posix': flags|=getattr(os,'O_NONBLOCK',0)
+        fd=os.open(path,flags,0o600)
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode): raise MDBMError('Invalid state guard.')
             if os.fstat(fd).st_size==0: os.write(fd,b'0')
@@ -2469,7 +2475,10 @@ class StateStore:
         if not self.enabled: return None
         try:
             p=self._path(name)
-            with p.open('rb') as f: raw=f.read(max_bytes+1)
+            # Lease/owner JSON can be inspected while recovery.guard is held.
+            # Non-regular replacement paths (especially POSIX FIFOs) must
+            # never block that shared transaction; validate the descriptor.
+            with self._open_recovery_regular(p) as f: raw=f.read(max_bytes+1)
             if len(raw)>max_bytes: raise MDBMError('State file exceeds its size limit')
             return json.loads(raw)
         except FileNotFoundError: return None
@@ -2492,9 +2501,30 @@ class StateStore:
 
     def write(self, name: str, value: Any) -> None:
         if not self.enabled: return
-        if _RECOVERY_NAME.fullmatch(name) and isinstance(value,dict) and value.get('schema') in (
-                'mdbm-recovery/1.0','mdbm-recovery/2.0','mdbm-recovery/3.0'):
-            self.write_recovery(name,value); return
+        # Kernel ownership and lease records belong to the StateStore
+        # lifecycle, never to generic application-state publication.
+        # Allowing their replacement can make a live owner appear stale.
+        if name=='lock.json' or _STATE_LEASE_NAME.fullmatch(name):
+            raise MDBMError('Ownership metadata is internal; state write rejected.')
+        # Content-addressed blobs are not JSON state. Only guarded recovery
+        # publication may create or repair them; otherwise a public write
+        # can silently corrupt every snapshot sharing the same digest.
+        if _RECOVERY_BLOB.fullmatch(name):
+            raise MDBMError('Recovery content requires guarded publication; blob retained.')
+        # A secondary must not replace the primary's last session, even
+        # though its own unsaved work is written to an isolated recovery slot.
+        if name=='session.json' and not self.owns_lock:
+            raise MDBMError('Another instance owns session state; previous session retained.')
+        if _RECOVERY_NAME.fullmatch(name):
+            # Recovery files must never fall through to unguarded JSON
+            # publication, even for invalid or future-version payloads.
+            # Otherwise a secondary could overwrite a live primary snapshot
+            # simply by supplying an unrecognized schema.
+            if not isinstance(value,dict) or value.get('schema') not in (
+                    'mdbm-recovery/1.0','mdbm-recovery/2.0','mdbm-recovery/3.0'):
+                raise MDBMError('Unsupported recovery format; snapshot retained.')
+            self.write_recovery(name,value)
+            return
         self._write_json(name,value)
 
     def _snapshot_paths(self) -> Iterator[Path]:
@@ -2506,19 +2536,51 @@ class StateStore:
             raise MDBMError('Invalid recovery content reference.')
         return self._path('content-'+digest+'.bin')
 
+    @staticmethod
+    def _open_recovery_regular(path: Path, text: bool = False) -> Any:
+        """Reject FIFOs/devices and avoid following replacement symlinks.
+
+        A non-regular archive or content blob must never block while the
+        shared recovery.guard is held. O_NONBLOCK prevents FIFO open waits;
+        fstat validates the opened descriptor instead of a racy path stat.
+        """
+        flags=os.O_RDONLY|getattr(os,'O_BINARY',0)|getattr(os,'O_NOFOLLOW',0)
+        if os.name=='posix': flags|=getattr(os,'O_NONBLOCK',0)
+        fd=os.open(path,flags)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise MDBMError('Recovery material is not a regular file.')
+            return os.fdopen(fd,'r',encoding='utf-8') if text else os.fdopen(fd,'rb')
+        except BaseException:
+            os.close(fd)
+            raise
+
+    def _recovery_revision(self, name: str) -> tuple[int,int,int,int,int]:
+        """Bounded regular-file identity for a confirmed unreadable archive.
+
+        This is a cooperative cross-process version check, not a content digest:
+        recovery.guard serializes MDBM publishers, and descriptor metadata
+        prevents a stale UI confirmation from deleting a replaced bad archive.
+        """
+        if not _RECOVERY_NAME.fullmatch(name):
+            raise MDBMError('Invalid recovery snapshot name.')
+        with self._open_recovery_regular(self._path(name)) as stream:
+            info=os.fstat(stream.fileno())
+        return (info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+
     def _read_recovery(self, name: str, max_bytes: int, metadata_only: bool = False) -> dict[str,Any]:
         if not _RECOVERY_NAME.fullmatch(name): raise MDBMError('Invalid recovery snapshot name.')
         path=self._path(name)
         maximum=MAX_OPEN_DOCUMENTS*(6*max_bytes+RECOVERY_MANIFEST_BYTES)+RECOVERY_MANIFEST_BYTES
-        file_bytes=path.stat().st_size
-        if file_bytes>maximum: raise MDBMError('Recovery exceeds its aggregate size limit.')
-        with path.open('r',encoding='utf-8') as stream:
+        with self._open_recovery_regular(path,text=True) as stream:
+            file_bytes=os.fstat(stream.fileno()).st_size
+            if file_bytes>maximum: raise MDBMError('Recovery exceeds its aggregate size limit.')
             record=RecoveryJSONReader(stream,max_bytes,metadata_only,file_bytes).read()
         schema=record.get('schema')
         if schema not in ('mdbm-recovery/1.0','mdbm-recovery/2.0','mdbm-recovery/3.0'):
             raise MDBMError('Unsupported recovery format.')
         if schema=='mdbm-recovery/3.0':
-            if path.stat().st_size>RECOVERY_MANIFEST_BYTES: raise MDBMError('Recovery manifest exceeds its size limit.')
+            if file_bytes>RECOVERY_MANIFEST_BYTES: raise MDBMError('Recovery manifest exceeds its size limit.')
             docs=record.get('documents')
             if not isinstance(docs,list) or not docs or len(docs)>MAX_OPEN_DOCUMENTS:
                 raise MDBMError('Invalid recovery document set.')
@@ -2535,7 +2597,7 @@ class StateStore:
                 hydrated=[]
                 for item in docs:
                     blob=self._blob_path(item['content'])
-                    with blob.open('rb') as stream: raw=stream.read(item['bytes']+1)
+                    with self._open_recovery_regular(blob) as stream: raw=stream.read(item['bytes']+1)
                     if len(raw)!=item['bytes'] or hashlib.sha256(raw).hexdigest()!=item['digest']:
                         raise MDBMError('Recovery text failed its integrity check.')
                     hydrated.append(dict(item,text=raw.decode('utf-8')))
@@ -2556,39 +2618,102 @@ class StateStore:
                     raise MDBMError('Recovery text failed its integrity check.')
         return record
 
-    def read_recovery(self, name: str, max_bytes: int) -> dict[str,Any]:
-        # Readers share the publication guard with deletion and collection.
+    def _require_recovery_enabled(self) -> None:
+        # A failed StateStore must not create a recovery guard, read through
+        # an unsafe state directory, or mutate another owner's archives.
+        # Generic write() already fails closed by returning early, but direct
+        # recovery entry points also need an explicit boundary.
+        if not self.enabled:
+            raise MDBMError('Persistence unavailable; recovery access rejected.')
+
+    def read_recovery(self, name: str, max_bytes: int, *,
+                      expected_metadata: Mapping[str,Any] | None = None) -> dict[str,Any]:
+        self._require_recovery_enabled()
+        # A Restore intent refers to the revision inspected in the confirmation
+        # dialog, not whatever another instance published before this worker
+        # reached the disk. Keep the comparison and hydration in one guard.
         with StateFileLock(self.directory/'recovery.guard',True):
+            if (expected_metadata is not None and
+                    self._read_recovery(name,max_bytes,True)!=expected_metadata):
+                raise MDBMError('Recovery archive changed since inspection; refresh inventory.')
             return self._read_recovery(name,max_bytes)
 
     def recovery_metadata(self, name: str, max_bytes: int) -> dict[str,Any]:
+        self._require_recovery_enabled()
         with StateFileLock(self.directory/'recovery.guard',True):
             return self._read_recovery(name,max_bytes,True)
+
+    def inspect_recovery_revision(self, name: str, max_bytes: int
+                                  ) -> tuple[dict[str,Any] | None,str,tuple[int,int,int,int,int] | None]:
+        """Inspect readable or damaged archives with one guarded identity."""
+        self._require_recovery_enabled()
+        with StateFileLock(self.directory/'recovery.guard',True):
+            try: revision=self._recovery_revision(name)
+            except (MDBMError,OSError,UnicodeError,ValueError) as exc:
+                # Do not offer a destructive action for a missing, special,
+                # inaccessible, or otherwise unidentifiable directory entry.
+                return None,display_text(exc),None
+            try: return self._read_recovery(name,max_bytes,True),'',revision
+            except (MDBMError,OSError,UnicodeError,ValueError) as exc:
+                return None,display_text(exc),revision
 
     def snapshot_live(self, record: Mapping[str,Any]) -> bool:
         owner=record.get('owner')
         if not isinstance(owner,dict): return False
         token=owner.get('token')
         if not isinstance(token,str) or not re.fullmatch('[0-9a-f]{32}',token): return True
-        lease=self.read('lease-'+token+'.json',4096)
-        if isinstance(lease,dict) and lease.get('primary') is True:
-            current=self.read('lock.json',4096)
-            if not isinstance(current,dict) or current.get('token')!=token: return False
-        return isinstance(lease,dict) and lease.get('token')==token and _process_alive(lease.get('pid'))
+        lease_name='lease-'+token+'.json'
+        lease=self.read(lease_name,4096)
+        if not isinstance(lease,dict):
+            # Only a genuinely absent lease is evidence of a free slot.
+            # Do not use _path() here: its link check raises for a suspect
+            # lease, and Path.exists() follows dangling symlinks. lstat()
+            # sees the directory entry itself, never its target. An I/O
+            # error is likewise not proof that the lease disappeared.
+            try:
+                (self.directory/lease_name).lstat()
+            except FileNotFoundError:
+                return False
+            except OSError:
+                return True
+            return True
+        if lease.get('token')!=token or type(lease.get('primary')) is not bool:
+            return True  # Inconsistent ownership metadata is unverified.
+        # A lease claiming to be primary is not proof its process stopped
+        # when lock.json names a different owner. Corruption or a mislabelled
+        # live follower lease must not release the follower's recovery slot.
+        # A genuinely terminated PID remains reclaimable.
+        return _process_alive(lease.get('pid'))
 
     def can_modify_recovery(self, name: str, record: Mapping[str,Any]) -> bool:
         if not self.owns_lock: return False
+        # A parseable archive may still have missing/inconsistent owner fields.
+        # Its tokenized filename also reserves a live follower's slot, as for
+        # publication and explicit deletion of unreadable archives. Do not let
+        # damaged metadata bypass that independent evidence of ownership.
+        match=re.fullmatch(r'recovery-([0-9a-f]{32})\.json',name)
+        if match and match.group(1)!=self.token and self.snapshot_live(
+                {'owner':{'token':match.group(1)}}):
+            return False
         owner=record.get('owner',{})
         return not self.snapshot_live(record) or (isinstance(owner,dict) and owner.get('token')==self.token)
 
-    def recovery_inventory(self, offset: int = 0, limit: int = RECOVERY_PAGE_SIZE) -> dict[str,Any]:
-        """Stat every archive before newest-first paging; never read text here."""
+    def recovery_inventory(self, offset: int = 0, limit: int = RECOVERY_PAGE_SIZE,
+                           *, strict_storage: bool = False) -> dict[str,Any]:
+        """Page by timestamp; reject unknown storage usage during publication.
+
+        The interactive inventory is best-effort, but a quota decision cannot
+        skip entries whose sizes are inaccessible. This matters especially when
+        an unreadable manifest has already prevented orphan collection.
+        """
         offset=max(0,offset); limit=max(1,min(100,limit)); newest=[]; total_bytes=0; total=0
         if not self.enabled: return {'entries':[],'total':0,'bytes':0,'offset':offset,'limit':limit}
         for path in self._snapshot_paths():
             try:
                 st=path.lstat()
                 if not stat.S_ISREG(st.st_mode):
+                    if strict_storage:
+                        raise MDBMError('Recovery storage usage cannot be verified: unsafe archive; previous snapshot retained.')
                     item={'name':path.name,'mtime_ns':st.st_mtime_ns,'size':0,'error':'Unsafe state file'}
                 else:
                     item={'name':path.name,'mtime_ns':st.st_mtime_ns,'size':st.st_size}
@@ -2597,10 +2722,16 @@ class StateStore:
                 entry=(item['mtime_ns'],item['name'],item)
                 if len(newest)<offset+limit: heapq.heappush(newest,entry)
                 elif entry[:2]>newest[0][:2]: heapq.heapreplace(newest,entry)
-            except OSError: continue
+            except OSError as exc:
+                if strict_storage:
+                    raise MDBMError('Recovery storage usage cannot be verified: '+display_text(exc)) from None
+                continue
         for path in self.directory.iterdir():
             if _RECOVERY_BLOB.fullmatch(path.name):
-                with contextlib.suppress(OSError): total_bytes+=path.lstat().st_size
+                try: total_bytes+=path.lstat().st_size
+                except OSError as exc:
+                    if strict_storage:
+                        raise MDBMError('Recovery storage usage cannot be verified: '+display_text(exc)) from None
         entries=[entry[2] for entry in sorted(newest,reverse=True)[offset:offset+limit]]
         return {'entries':entries,'total':total,'bytes':total_bytes,
                 'offset':offset,'limit':limit,'storage_limit':self.recovery_storage_limit}
@@ -2623,8 +2754,29 @@ class StateStore:
         removed=0
         for path in self.directory.iterdir():
             match=_RECOVERY_BLOB.fullmatch(path.name)
-            if match and match.group(1) not in referenced and not path.is_symlink():
-                size=path.stat().st_size; path.unlink(); removed+=size
+            if not match or match.group(1) in referenced: continue
+            # A directory, FIFO or symlink merely resembling a blob must not
+            # interrupt the recovery transaction or be removed by GC. Only
+            # regular, unreferenced content is ours to collect.
+            try:
+                st=path.lstat()
+            except FileNotFoundError:
+                continue
+            # An unstatable entry cannot be safely accounted against the
+            # storage quota; keep the existing fail-closed error in that case.
+            if not stat.S_ISREG(st.st_mode): continue
+            try:
+                path.unlink(); removed+=st.st_size
+            except FileNotFoundError:
+                # A non-cooperating process may have removed it already.
+                continue
+            except OSError:
+                # Windows sharing violations and permission errors can make
+                # an *unreferenced* file temporarily undeletable. Its bytes
+                # remain charged by recovery_inventory; do not block an
+                # otherwise durable snapshot unless the quota is exceeded.
+                notice='Recovery orphan cleanup deferred; retained content still counts toward the storage limit.'
+                if notice not in self.diagnostics: self.diagnostics.append(notice)
         return removed
 
     def collect_recovery_garbage(self) -> int:
@@ -2632,12 +2784,24 @@ class StateStore:
         with StateFileLock(self.directory/'recovery.guard',True):
             removed=self._collect_orphan_blobs(); SafeFiles._sync_dir(self.directory); return removed
 
-    def write_recovery(self, name: str, value: Mapping[str,Any]) -> None:
-        if not _RECOVERY_NAME.fullmatch(name): raise MDBMError('Invalid recovery snapshot name.')
+    def _prepare_recovery(self, value: Mapping[str,Any]) -> tuple[list[dict[str,Any]],dict[str,str],bytes]:
+        """Validate and encode a candidate without touching durable snapshots."""
         schema=value.get('schema'); sources=([value] if schema=='mdbm-recovery/1.0' else value.get('documents'))
         if not isinstance(sources,list) or not sources or len(sources)>MAX_OPEN_DOCUMENTS:
             raise MDBMError('Recovery document set exceeds its limit.')
-        docs=[]; texts={}
+        docs=[]; texts={}; declared_sizes={}
+        seen_ids:set[str]=set()
+        seen_paths:set[str]=set()
+        root=value.get('root')
+        # An absent/invalid workspace cannot be restored, and must not
+        # replace an already recoverable archive via the direct state API.
+        if (not isinstance(root,str) or not root.strip() or '\x00' in root or
+                not os.path.isabs(root) or os.path.normpath(root)!=root):
+            # Restore matches the canonical absolute SafeFiles.root exactly.
+            # Relative/unnormalized roots can never be selected there, yet
+            # would otherwise replace an already recoverable snapshot.
+            raise MDBMError('Invalid recovery workspace root; previous snapshot retained.')
+        root_base=root
         fields={'document_id','path','text','digest','baseline','fingerprint','cursor','anchor',
                 'newline','bom','memories','contents_collapsed','content','bytes'}
         for item in sources:
@@ -2645,12 +2809,74 @@ class StateStore:
             if schema=='mdbm-recovery/1.0':
                 item={k:v for k,v in item.items() if k not in ('schema','root','timestamp')}
             if set(item)-fields: raise MDBMError('Unsupported recovery document metadata.')
+            # Validate the minimum metadata needed to hydrate a document
+            # *before* replacing its saved recovery manifest. Both legacy and
+            # v3 partial publications must meet the same Restore contract.
+            baseline=item.get('baseline')
+            if not isinstance(baseline,str) or not re.fullmatch('[0-9a-f]{64}',baseline):
+                raise MDBMError('Invalid recovery document baseline; previous snapshot retained.')
+            # Restore constructs a Fingerprint from this record before touching
+            # a live buffer. Validate it here so an unhydratable fingerprint
+            # cannot replace the last readable, unsaved snapshot.
+            fingerprint_from_json(item.get('fingerprint'))
+            path=item.get('path')
+            if path is not None and not isinstance(path,str):
+                raise MDBMError('Invalid recovery document path; previous snapshot retained.')
+            # Restore refuses duplicated live buffer identities/paths. Enforce
+            # that same invariant before any durable manifest can replace
+            # the previous recoverable snapshot (also for v3 partial writes).
+            ident=item.get('document_id')
+            if isinstance(ident,str):
+                if ident in seen_ids:
+                    raise MDBMError('Duplicate recovery document identity; previous snapshot retained.')
+                seen_ids.add(ident)
+            path=item.get('path')
+            if isinstance(path,str) and path:
+                # Match the lexical SafeFiles.resolve() boundary without
+                # opening paths: a changed/missing source must not prevent
+                # preserving dirty text in recovery. Restore will separately
+                # verify symlinks, junctions and actual filesystem state.
+                if any(unsafe_codepoint(ch) for ch in path):
+                    raise MDBMError('Invalid recovery document path; previous snapshot retained.')
+                if os.name=='nt':
+                    # Win32 path normalization can silently drop trailing dots
+                    # and spaces before resolved.parts is checked. Inspect the
+                    # original components first, retaining "." and ".." as
+                    # legitimate path navigation (bounded below by the root).
+                    tail=os.path.splitdrive(path)[1]
+                    if any(part.rstrip(' .')!=part
+                           for part in re.split(r'[\\/]+',tail)
+                           if part not in ('','.','..')):
+                        raise MDBMError('Invalid recovery document path; previous snapshot retained.')
+                resolved=Path(os.path.abspath(os.path.join(root_base,path)))
+                try: parts=resolved.relative_to(Path(root_base)).parts
+                except ValueError:
+                    raise MDBMError('Invalid recovery document path; previous snapshot retained.') from None
+                if not parts or any(part.casefold()=='.mdbm' for part in parts):
+                    raise MDBMError('Invalid recovery document path; previous snapshot retained.')
+                if os.name=='nt' and any(
+                        ':' in part or part.rstrip(' .')!=part or
+                        part.split('.')[0].upper() in
+                        {'CON','PRN','AUX','NUL',*(f'COM{i}' for i in range(1,10)),
+                         *(f'LPT{i}' for i in range(1,10))} for part in parts):
+                    raise MDBMError('Invalid recovery document path; previous snapshot retained.')
+                key=os.path.normcase(str(resolved))
+                if key in seen_paths:
+                    raise MDBMError('Duplicate recovery document path; previous snapshot retained.')
+                seen_paths.add(key)
             if schema=='mdbm-recovery/3.0':
                 digest=item.get('content'); self._blob_path(digest)
                 size=item.get('bytes')
                 if type(size) is not int or not 0<=size<=self.max_recovery_bytes:
                     raise MDBMError('Recovery source exceeds its size limit.')
                 if item.get('digest')!=digest: raise MDBMError('Recovery content digest is inconsistent.')
+                # Each digest names one immutable byte stream, irrespective of
+                # how many documents share it. A conflicting size in a second
+                # document must not overwrite a readable snapshot with a
+                # manifest that no reader could subsequently hydrate.
+                prior_size=declared_sizes.setdefault(digest,size)
+                if prior_size!=size:
+                    raise MDBMError('Inconsistent recovery content sizes; previous snapshot retained.')
                 docs.append(dict(item)); continue
             text=item.get('text')
             if not isinstance(text,str): raise MDBMError('Invalid recovery source.')
@@ -2667,28 +2893,71 @@ class StateStore:
                   'root':value.get('root'),'active_document':value.get('active_document'),
                   'documents':docs,'timestamp':value['timestamp'] if 'timestamp' in value else time.time(),
                   'owner':{'pid':os.getpid(),'token':self.token}}
-        encoded=json.dumps(manifest,ensure_ascii=True,separators=(',',':')).encode('utf-8')
+        try:
+            # Python's JSON encoder otherwise publishes NaN/Infinity, which
+            # are not JSON values and cannot be consumed by strict readers.
+            # Reject invalid metadata before any blob/manifest modification.
+            encoded=json.dumps(manifest,ensure_ascii=True,separators=(',',':'),
+                               allow_nan=False).encode('utf-8')
+        except (TypeError,ValueError,OverflowError,RecursionError) as exc:
+            raise MDBMError('Invalid recovery JSON metadata; previous snapshot retained: '+
+                            display_text(exc)) from None
         if len(encoded)>RECOVERY_MANIFEST_BYTES:
             raise MDBMError('Recovery metadata exceeds its size limit; previous snapshot retained.')
+        return docs,texts,encoded
+
+    def _assert_recovery_writable_locked(self, name: str) -> None:
+        """Prevent a secondary or another live owner replacing a recovery slot."""
+        if not self.owns_lock and name!=self.recovery_name:
+            raise MDBMError('Snapshot retained: another instance owns it.')
+        # The token in a follower's archive filename reserves its slot as
+        # soon as its live lease is published, even before its first snapshot.
+        # Otherwise the primary could preempt that empty path, and the
+        # follower's next save would then fail the foreign-owner check.
+        match=re.fullmatch(r'recovery-([0-9a-f]{32})\.json',name)
+        if match and match.group(1)!=self.token and self.snapshot_live(
+                {'owner':{'token':match.group(1)}}):
+            raise MDBMError('Snapshot retained: another instance has reserved this recovery slot.')
+        path=self._path(name)
+        if not path.exists(): return
+        try: previous=self._read_recovery(name,self.max_recovery_bytes,True)
+        except (OSError,UnicodeError,MDBMError,ValueError):
+            raise MDBMError('Existing recovery archive is unreadable; snapshot retained.') from None
+        if self.snapshot_live(previous):
+            owner=previous.get('owner')
+            if not isinstance(owner,dict) or owner.get('token')!=self.token:
+                raise MDBMError('Snapshot retained: another instance owns it.')
+
+    def _publish_recovery_locked(self, name: str, docs: list[dict[str,Any]],
+                                 texts: dict[str,str], encoded: bytes) -> None:
+        """Publish only under recovery.guard, including the quota and GC checks."""
+        self._assert_recovery_writable_locked(name)
+        self._collect_orphan_blobs()
+        usage=self.recovery_inventory(strict_storage=True)['bytes']
+        old_size=self._path(name).stat().st_size if self._path(name).exists() else 0
+        missing={}; replaced_bytes=0
+        for digest,size in {item['content']:item['bytes'] for item in docs}.items():
+            blob=self._blob_path(digest)
+            if blob.exists():
+                with self._open_recovery_regular(blob) as stream:
+                    previous_size=os.fstat(stream.fileno()).st_size
+                    previous=stream.read(size+1)
+                if len(previous)==size and hashlib.sha256(previous).hexdigest()==digest: continue
+                replaced_bytes+=previous_size
+            missing[digest]=size
+        if any(digest not in texts for digest in missing): raise MDBMError('Recovery content is missing.')
+        if usage-old_size-replaced_bytes+len(encoded)+sum(missing.values())>self.recovery_storage_limit:
+            raise MDBMError('Recovery storage limit reached; previous snapshot retained. Open File → Recovery inventory to discard unneeded archives.')
+        for digest in missing: self._write_bytes(self._blob_path(digest).name,texts[digest].encode('utf-8'))
+        self._write_bytes(name,encoded)
+        self._collect_orphan_blobs()
+
+    def write_recovery(self, name: str, value: Mapping[str,Any]) -> None:
+        self._require_recovery_enabled()
+        if not _RECOVERY_NAME.fullmatch(name): raise MDBMError('Invalid recovery snapshot name.')
+        docs,texts,encoded=self._prepare_recovery(value)
         with StateFileLock(self.directory/'recovery.guard',True):
-            self._collect_orphan_blobs()
-            usage=self.recovery_inventory()['bytes']
-            old_size=self._path(name).stat().st_size if self._path(name).exists() else 0
-            missing={}; replaced_bytes=0
-            for digest,size in {item['content']:item['bytes'] for item in docs}.items():
-                blob=self._blob_path(digest)
-                if blob.exists():
-                    previous_size=blob.stat().st_size
-                    with blob.open('rb') as stream: previous=stream.read(size+1)
-                    if len(previous)==size and hashlib.sha256(previous).hexdigest()==digest: continue
-                    replaced_bytes+=previous_size
-                missing[digest]=size
-            if any(digest not in texts for digest in missing): raise MDBMError('Recovery content is missing.')
-            if usage-old_size-replaced_bytes+len(encoded)+sum(missing.values())>self.recovery_storage_limit:
-                raise MDBMError('Recovery storage limit reached; previous snapshot retained. Open File → Recovery inventory to discard unneeded archives.')
-            for digest in missing: self._write_bytes(self._blob_path(digest).name,texts[digest].encode('utf-8'))
-            self._write_bytes(name,encoded)
-            self._collect_orphan_blobs()
+            self._publish_recovery_locked(name,docs,texts,encoded)
 
     def recovery(self, doc: DocumentModel, root: Path) -> None:
         if not doc.dirty: return
@@ -2698,22 +2967,56 @@ class StateStore:
             'cursor':doc.cursor,'anchor':doc.anchor,'newline':doc.newline,'bom':doc.bom,'timestamp':time.time()})
 
     def discard_recovery(self, name: str, remaining: Mapping[str,Any] | None = None,
-                         allow_invalid: bool = False) -> None:
+                         allow_invalid: bool = False, *,
+                         expected_metadata: Mapping[str,Any] | None = None,
+                         expected_unreadable: tuple[int,int,int,int,int] | None = None) -> None:
+        self._require_recovery_enabled()
         if not _RECOVERY_NAME.fullmatch(name): raise MDBMError('Invalid recovery snapshot name.')
+        # Deleting a damaged archive is destructive even if another writer
+        # replaces it with a *different damaged archive*. Never allow callers
+        # to bypass the versioned confirmation required by the inventory UI.
+        if allow_invalid and expected_unreadable is None:
+            raise MDBMError('Unreadable archive discard requires an inspected file revision.')
+        # A readable archive is also a selected revision. A direct API caller
+        # must not bypass the UI's stale-confirmation protection by omitting
+        # inspected metadata, even when it requests only a partial rewrite.
+        if not allow_invalid and expected_metadata is None:
+            raise MDBMError('Readable archive discard requires inspected metadata.')
         with StateFileLock(self.directory/'recovery.guard',True):
+            if expected_unreadable is not None:
+                if not allow_invalid:
+                    raise MDBMError('An unreadable selection requires explicit discard authorization.')
+                # This must run under the *same* transaction guard as unlink.
+                # A second corrupt publication is still a changed selection.
+                if self._recovery_revision(name)!=expected_unreadable:
+                    raise MDBMError('Recovery archive changed since inspection; refresh inventory.')
             try: record=self._read_recovery(name,self.max_recovery_bytes,True)
             except (MDBMError,OSError,UnicodeError,ValueError):
                 if not allow_invalid or not self.owns_lock or name==self.recovery_name: raise
                 token=name.removeprefix('recovery-').removesuffix('.json')
-                if re.fullmatch('[0-9a-f]{32}',token):
-                    lease=self.read('lease-'+token+'.json',4096)
-                    if isinstance(lease,dict) and _process_alive(lease.get('pid')):
-                        raise MDBMError('Snapshot retained: its instance is active.')
+                if re.fullmatch('[0-9a-f]{32}',token) and self.snapshot_live(
+                        {'owner':{'token':token}}):
+                    # Apply the same conservative lease check even when the
+                    # damaged archive itself has no readable owner metadata.
+                    raise MDBMError('Snapshot retained: its instance is active.')
                 record={}
+            else:
+                # A selection is authority for the version the user inspected,
+                # not for a successor published while the confirmation was open.
+                # This check is inside recovery.guard, before partial rewrite or
+                # deletion. An unreadable-discard intent cannot delete an archive
+                # that has since become readable either.
+                if allow_invalid or (expected_metadata is not None and record != expected_metadata):
+                    raise MDBMError('Recovery archive changed since inspection; refresh inventory.')
             if not self.can_modify_recovery(name,record): raise MDBMError('Snapshot retained: another instance owns it.')
             if remaining is None:
                 self._path(name).unlink(missing_ok=True); self._collect_orphan_blobs(); SafeFiles._sync_dir(self.directory)
-        if remaining is not None: self.write(name,remaining)
+            else:
+                # The same guard must cover ownership validation and the
+                # partial replacement; another process cannot claim this slot
+                # or change the archive between those two operations.
+                docs,texts,encoded=self._prepare_recovery(remaining)
+                self._publish_recovery_locked(name,docs,texts,encoded)
 
     def clear_recovery(self) -> None:
         if not self.enabled: return
@@ -4093,7 +4396,7 @@ class Workspace:
                         items=[MenuItem('Reading and checking saved text…',enabled=False)])
         self.push_overlay(loading)
         def prepare() -> tuple[dict[str,Any],tuple[DocumentModel,...]]:
-            record=store.read_recovery(name,files.max_bytes)
+            record=store.read_recovery(name,files.max_bytes,expected_metadata=metadata)
             if record.get('root')!=str(files.root): raise MDBMError('Recovery belongs to a different workspace.')
             records=self._recovery_records(record)
             if not records or len(records)>MAX_OPEN_DOCUMENTS: raise MDBMError('Recovery document set is invalid.')
@@ -4114,7 +4417,7 @@ class Workspace:
             def consumed() -> None:
                 if getattr(self,'_closing',False) or getattr(self,'_shutting_down',False): return
                 if mutable and self.store is store and self.files is files:
-                    self._recovery_io(lambda:store.discard_recovery(name),lambda value:None)
+                    self._recovery_io(lambda:store.discard_recovery(name,expected_metadata=metadata),lambda value:None)
             def publish(value: Any = None) -> None:
                 if getattr(self,'_closing',False) or getattr(self,'_shutting_down',False): return
                 # Archive consumption must follow the successful durable write,
@@ -4143,7 +4446,7 @@ class Workspace:
                     full=store.read_recovery(name,self.files.max_bytes)
                     remainder=dict(full,documents=[item for item in self._recovery_records(full)
                                    if item.get('path')!=str(active)])
-            store.discard_recovery(name,remainder)
+            store.discard_recovery(name,remainder,expected_metadata=metadata)
         def finished(value: Any) -> None:
             self.status('Recovery selection discarded; source files were not changed.')
             if inventory: self.show_recovery_inventory()
@@ -4200,18 +4503,18 @@ class Workspace:
         loading=Overlay('picker','Inspecting recovery snapshot',message='Esc cancels inspection.',
                         items=[MenuItem('Reading saved document details…',enabled=False)])
         self.push_overlay(loading)
-        def load() -> tuple[dict[str,Any] | None,str]:
-            try: return store.recovery_metadata(name,maximum),''
-            except (MDBMError,OSError,UnicodeError,ValueError) as exc: return None,display_text(exc)
-        def display(result: tuple[dict[str,Any] | None,str]) -> None:
+        def load() -> tuple[dict[str,Any] | None,str,tuple[int,int,int,int,int] | None]:
+            return store.inspect_recovery_revision(name,maximum)
+        def display(result: tuple[dict[str,Any] | None,str,tuple[int,int,int,int,int] | None]) -> None:
             self.close_overlay(False)
-            record,error=result
+            record,error,revision=result
             if record is not None: self._present_recovery(name,record,inventory=True)
             else:
                 actions=[('Back',self.show_recovery_inventory)]
-                if store.owns_lock and name!=store.recovery_name:
+                if store.owns_lock and name!=store.recovery_name and revision is not None:
                     actions.insert(0,('Discard unreadable snapshot',lambda:self._recovery_io(
-                        lambda:store.discard_recovery(name,allow_invalid=True),lambda value:self.show_recovery_inventory())))
+                        lambda:store.discard_recovery(name,allow_invalid=True,
+                            expected_unreadable=revision),lambda value:self.show_recovery_inventory())))
                 self.confirm('Unreadable recovery snapshot',display_text(name)+'\n'+error+
                              '\nDiscard permanently removes this recovery archive; source files are unchanged.',actions,default=len(actions)-1)
         self._recovery_io(load,display,loading)
