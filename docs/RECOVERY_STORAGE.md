@@ -42,6 +42,12 @@ changed on-disk file or a later symlink substitution must not by itself prevent
 MDBM preserving unsaved buffer text. Restore still performs its separate
 filesystem, symlink/junction and fingerprint checks before applying buffers.
 
+The writer serializes manifests using strict JSON. Non-finite numbers
+(`NaN`, `Infinity`, `-Infinity`), unsupported objects and excessive nesting in
+allowed metadata fields are rejected before touching durable content. This
+applies to ordinary publication and guarded partial replacements alike, so
+invalid metadata cannot replace a recoverable unsaved snapshot.
+
 The writer and reader enforce the same limits: at most 32 documents, each
 within the configured `application.max_file_mib` UTF-8 byte budget, and a
 manifest no larger than 16 MiB. Text no longer expands into ASCII-escaped JSON

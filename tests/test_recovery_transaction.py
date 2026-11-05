@@ -1106,3 +1106,38 @@ def test_valid_fingerprint_metadata_remains_publishable(store,tmp_path,operation
     assert restored['documents'][0]['text']=='updated unsaved text'
     assert restored['documents'][0]['fingerprint']==expected
     assert m.fingerprint_from_json(restored['documents'][0]['fingerprint'])==m.Fingerprint(**expected)
+
+@pytest.mark.parametrize('operation',['write','partial_replacement'])
+@pytest.mark.parametrize('invalid',[
+    'timestamp_nan','timestamp_pos_inf','timestamp_neg_inf',
+    'document_cursor_nan','nested_memory_inf','nonserializable_selection',
+])
+def test_invalid_json_metadata_cannot_replace_recoverable_snapshot(
+        store,tmp_path,operation,invalid):
+    """A public publisher cannot write non-JSON values over dirty recovery."""
+    name=store.recovery_name
+    store.write(name,bundle(tmp_path,['preserved unsaved text']))
+    before_metadata=store.recovery_metadata(name,4096)
+    before_manifest=(store.directory/name).read_bytes()
+    before_blobs={p.name:p.read_bytes() for p in store.directory.glob('content-*.bin')}
+    candidate=bundle(tmp_path,['replacement unsaved text'])
+    if invalid=='timestamp_nan':
+        candidate['timestamp']=float('nan')
+    elif invalid=='timestamp_pos_inf':
+        candidate['timestamp']=float('inf')
+    elif invalid=='timestamp_neg_inf':
+        candidate['timestamp']=-float('inf')
+    elif invalid=='document_cursor_nan':
+        candidate['documents'][0]['cursor']=float('nan')
+    elif invalid=='nested_memory_inf':
+        candidate['documents'][0]['memories']={'edit':{'scroll':float('inf')}}
+    else:
+        candidate['active_document']={'invalid':{1,2,3}}
+    with pytest.raises(m.MDBMError,match='Invalid recovery JSON metadata'):
+        if operation=='write':
+            store.write(name,candidate)
+        else:
+            store.discard_recovery(name,candidate,expected_metadata=before_metadata)
+    assert (store.directory/name).read_bytes()==before_manifest
+    assert {p.name:p.read_bytes() for p in store.directory.glob('content-*.bin')}==before_blobs
+    assert store.read_recovery(name,4096)['documents'][0]['text']=='preserved unsaved text'

@@ -2893,7 +2893,15 @@ class StateStore:
                   'root':value.get('root'),'active_document':value.get('active_document'),
                   'documents':docs,'timestamp':value['timestamp'] if 'timestamp' in value else time.time(),
                   'owner':{'pid':os.getpid(),'token':self.token}}
-        encoded=json.dumps(manifest,ensure_ascii=True,separators=(',',':')).encode('utf-8')
+        try:
+            # Python's JSON encoder otherwise publishes NaN/Infinity, which
+            # are not JSON values and cannot be consumed by strict readers.
+            # Reject invalid metadata before any blob/manifest modification.
+            encoded=json.dumps(manifest,ensure_ascii=True,separators=(',',':'),
+                               allow_nan=False).encode('utf-8')
+        except (TypeError,ValueError,OverflowError,RecursionError) as exc:
+            raise MDBMError('Invalid recovery JSON metadata; previous snapshot retained: '+
+                            display_text(exc)) from None
         if len(encoded)>RECOVERY_MANIFEST_BYTES:
             raise MDBMError('Recovery metadata exceeds its size limit; previous snapshot retained.')
         return docs,texts,encoded
