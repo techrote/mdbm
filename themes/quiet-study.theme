@@ -1,0 +1,71 @@
+# Content-first, non-animated reference theme. The host owns all controls.
+schema = "md-editor-theme/1.1"
+id = "quiet-study"
+name = "Quiet Study"
+description = "Soft charcoal, warm paper-white text and sage rules. Quiet, fitted margins for sustained writing and review."
+seed = 106
+seed_mode = "fixed"
+fps = 8
+
+[palette]
+paper = "#171d21"
+ink = "#e3e7df"
+muted = "#9aa8a3"
+frame = "#657b75"
+accent = "#b1d3c2"
+code = "#dfc3a4"
+heading = "#d4dfcb"
+link = "#a5cce2"
+warning = "#efd29b"
+error = "#f3a9a5"
+rule = "#344641"
+
+[geometry]
+outer = [0, 0, 0, 0]
+border = 1
+divider = 1
+spacer = 0
+
+[styles.rule]
+fg = "rule"
+bg = "paper"
+
+[styles.quote]
+fg = "muted"
+bg = "paper"
+italic = true
+
+[art.margin]
+rows = ["╭────╮", "│    │", "│    │", "╰────╯"]
+style = "rule"
+
+[[layers]]
+id = "margin"
+slot = "outer"
+art = "margin"
+fit = "frame"
+frame_insets = [1, 1, 1, 1]
+mode = "transparent-cell"
+
+[[variants]]
+when = { high_contrast = true }
+hide_layers = ["margin"]
+
+[[variants]]
+when = { max_width = 90 }
+hide_layers = ["margin"]
+
+[fallbacks.ascii]
+glyph = "."
+hide_layers = ["margin"]
+
+[fallbacks.monochrome]
+glyph = "."
+hide_layers = ["margin"]
+
+[fallbacks.narrow]
+glyph = "."
+hide_layers = ["margin"]
+
+[fallbacks.reduced_motion]
+glyph = "."

@@ -1,4 +1,20 @@
-# MDBM 1.0.0a2 — implementation and verification report
+# MDBM implementation and verification report
+
+## Current increment: 1.0.0a4
+
+See [the continuation's review, implementation plan and verification
+record](EXTENSION_PASS_2026-11-03.md) for recovery storage/inventory, background
+I/O and search, cached reflow, workspace presets and appearance transactions.
+[The earlier pass](IMPROVEMENT_PASS_2026-11-03.md) records the document picker,
+Save All, preview/recovery repairs and permanent Linux/Windows CI. Current
+qualification uses the declared release dependencies. Historical limitations
+below describe the original delivery and are superseded only where the newer
+records provide implementation and evidence.
+
+The remainder of this report preserves the **historical 1.0.0a2 delivery**.
+Its 513-test count, bootstrap-dependency caveat and performance measurements
+describe that environment and date; they are not the current qualification
+record. Native terminal and full product-contract acceptance remain open.
 
 ## Release decision
 

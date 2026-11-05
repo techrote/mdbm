@@ -2,7 +2,17 @@
 
 **A cell-native Markdown reader/editor for the terminal.**
 
-Version **1.0.0a2** is a runnable implementation alpha, not a declaration that every acceptance gate in the supplied plan has passed. The application has one runtime Python source, `mdbm.py`. Themes are validated TOML data; they cannot execute code or operate the editor.
+Version **1.0.0a4** is a runnable implementation alpha, not a declaration that every acceptance gate in the supplied plan has passed. The application has one runtime Python source, `mdbm.py`. Themes are validated TOML data; they cannot execute code or operate the editor.
+
+The [November 2026 improvement pass](docs/IMPROVEMENT_PASS_2026-11-03.md)
+adds a searchable document switcher, search across open buffers, and guarded
+Save All. It also repairs multi-document recovery, preview handoffs,
+Windows state-lock probing, installed theme discovery, and ongoing CI.
+
+The [continuation](docs/EXTENSION_PASS_2026-11-03.md) adds bounded per-document
+recovery storage and a recovery inventory, background file/state work and
+open-buffer search, cached Markdown reflow, deferred fragment navigation,
+workspace presets, maximize/restore and transactional appearance controls.
 
 ![Actual composed cells: Neon Circuitry](docs/screenshots/neon-circuitry.png)
 
@@ -45,6 +55,7 @@ Drag either one-cell divider with the left or right mouse button. Release commit
 | Command palette / emergency route | **Ctrl+P** |
 | Restore all tiles | **Ctrl+T** |
 | Open / new / save / Save As | **Ctrl+O / Ctrl+N / Ctrl+S / F4** |
+| Switch document, filtering by name or path | **Ctrl+B** |
 | Quit, with dirty-state guard | **Ctrl+Q** |
 | Focus next / previous tile | **Tab / Shift+Tab** |
 | Direct tile focus | **Alt+1 … Alt+4** |
@@ -58,6 +69,39 @@ Drag either one-cell divider with the left or right mouse button. Release commit
 The palette exposes commands without dedicated shortcuts, including keyboard split resizing, theme selection, Contents filtering and script cancellation. Alt-prefixed keys can also be entered as Escape then the key where the terminal supports that convention. The ribbon uses a latched fallback, not a claim of portable Alt-key-release detection. Ctrl+H is kept compatible with Backspace; it is deliberately not Replace.
 
 The clipboard is **application-local**. Pasting from the operating system uses the terminal's own paste shortcut and bracketed-paste protocol. MDBM does not write OSC-52 clipboard escapes.
+
+### Working across documents
+
+Up to **32 documents** can stay open, with their own text, undo history,
+selection, scroll and preview. The tab strip keeps the active document
+visible; **Ctrl+B** provides a filterable list when tabs overflow. Type
+parts of a filename or relative path, then press Enter or click a result.
+An asterisk marks unsaved text. Escape leaves the current document alone.
+
+**Navigate → Search open documents** searches the current in-memory text
+of every open buffer, including unsaved and untitled documents. Search is
+literal and case-sensitive. Results show a filename, one-based source
+line and character column, and a short excerpt. Enter selects the match in
+Edit. Results are capped at 200; a changed or closed document cannot reuse
+an obsolete result. This command searches open buffers only; it does not
+scan unopened files on disk.
+
+Interactive searches run in a cancellable background job. Escape closes the
+search without publishing a late result. Only one pending query is retained;
+editing or closing a buffer still invalidates that buffer's old matches.
+
+**File → Save all changed documents** saves dirty buffers in tab order.
+Untitled buffers prompt for Save As, and changed destinations retain the
+usual conflict confirmation. Cancel or an error stops the remaining saves;
+earlier successful saves remain on disk. When the batch finishes, the
+original document becomes active again. All these commands are also
+available through **Ctrl+P**.
+
+Interactive opens and saves run in the background. You can keep typing while
+a save finishes; the submitted text is saved and any newer edits stay dirty.
+A guarded close/quit or Save All continuation stops if newer unsaved edits
+remain. Pending saves reserve both their source and destination until the
+controller acknowledges completion.
 
 ### Drag-and-drop files in a terminal
 
@@ -109,7 +153,21 @@ Saves publish atomically and check disk fingerprints. Existing destinations, cha
 
 ## Appearance and configuration
 
-The [theme catalogue](docs/THEME_CATALOG.md) lists **21 additional themes** with
+**Tile → Choose workspace preset…** offers Default, Writing, Reading and Review
+layouts, together with up to eight named custom layouts. Preview a layout,
+then apply it or cancel; per-document cursors, selections and scroll memories
+survive the change. Focused-tile maximize/restore temporarily expands the
+current tile without replacing the saved split layout; **Alt+M** invokes it.
+
+**Theme → Appearance and accessibility…** previews colour depth, ASCII rendering, high contrast,
+motion and spacing in one panel. Apply commits the choices; Escape/Cancel
+restores the previous settings. Only committed preferences enter session
+state, and `mdbm.conf` remains untouched. The static **Quiet Study** theme
+provides a restrained reading/writing option with narrow, ASCII and monochrome
+fallbacks. The [tailored UI contract](docs/MDBM_TUI_UX_SPEC.md) records the
+source-pinned design decisions and qualification boundaries.
+
+The [theme catalogue](docs/THEME_CATALOG.md) lists **22 additional themes** with
 launch IDs, guides and previews, alongside the six original file-based themes.
 
 The **Solid material relief** collection develops the sculpted trio into six
@@ -165,7 +223,26 @@ Normal content is opaque to decoration. Immersive behind-content art is opt-in; 
 
 ## Recovery and scripts
 
-Session and recovery data live in the configured local `.mdbm/` directory. A dirty recovery snapshot is separate from the source file: it does **not** silently save over that file. Restoring it retains the original disk fingerprint, so later external edits still trigger conflict checks. Snapshots are local plaintext, not encrypted. A second instance cannot take over another instance's state lock. Copy the source files and recovery directory before destructive troubleshooting.
+Session and recovery data live in the configured local `.mdbm/` directory. A dirty recovery snapshot is separate from the source file: it does **not** silently save over that file. Restoring it retains the original disk fingerprint, so later external edits still trigger conflict checks. Snapshots are local plaintext, not encrypted. State-owner checks retain live or uncertain owners, and Windows probes do not send console signals. Copy the source files and recovery directory before destructive troubleshooting.
+
+A previous session's snapshot is preserved before the new session starts
+writing recovery. **Later** and `--no-restore` keep that snapshot for a
+subsequent launch. Opening a specific file and restoring or discarding its
+recovery preserves the other documents in the same bundle. Recovery is
+validated before changing the open buffers, and differing current unsaved
+text is never silently replaced. Unchanged recoverable state does not
+rewrite the snapshot every interval.
+
+New recovery bundles use small manifests and individually checked UTF-8
+content blobs, with the same source-byte limit on writing and reading. Old
+version 1/2 snapshots remain readable. The recovery inventory exposes deferred
+snapshots in newest-first pages, including snapshots beyond the former
+64-entry discovery cutoff. Restore and discard are explicit, and archived
+snapshots do not expire silently. Storage-limit failures preserve the previous
+valid snapshot and appear as diagnostics. A persistent OS-held guard serializes
+primary-owner acquisition, including simultaneous attempts to reclaim a dead
+session. See the continuation report for the storage budgets and migration
+details.
 
 Scripts are trusted programs, **not a sandbox**. Only explicitly allowlisted `.py` siblings of `mdbm.py` are shown; `mdbm.py` itself is excluded. Arguments must be a JSON array such as `["a path with spaces", "--check"]`. The host invokes the current interpreter with shell disabled and captures bounded output. Themes and documents cannot launch them. POSIX cancellation terminates the process group; Windows cancellation currently targets the launched process, not every descendant.
 
@@ -179,11 +256,36 @@ python tests/render_gallery.py
 python tests/render_animation_gallery.py
 ```
 
-The delivered verification report records **513 passing tests**, including **96 deterministic golden configurations** and **four real POSIX pseudo-terminal tests**. Tests cover editing, geometry, source maps, modal interactions, conflict-safe files, recovery, scripts, malformed themes and bounded decoration. Golden baselines are implementation regression fixtures, not an independent visual oracle. `tests/update_goldens.py` updates them explicitly; review the gallery rather than accepting changed hashes blindly.
+The current source-bound results and remaining findings are recorded in
+[the continuation report](docs/EXTENSION_PASS_2026-11-03.md). The permanent
+[CI workflow](.github/workflows/tests.yml) runs the full suite on Ubuntu
+with Python 3.11 and 3.13 and on Windows with Python 3.13. Every job requires
+the real Markdown plugins, builds a wheel, and checks installed console
+entry points plus all packaged themes in both target and prefix layouts.
 
-The local environment had prompt-toolkit 3.0.52, below the declared 3.0.53 minimum, and lacked `mdit-py-plugins`. Therefore these results use the visibly diagnosed bootstrap parser path. The requirement bounds have **not** been weakened. The supplied CI workflow requires the release dependency path, but that remote workflow has not been run here.
+The suite includes **96 deterministic golden configurations**, real POSIX
+pseudo-terminal interactions, recovery/data-loss regressions, deterministic
+preview interleavings, and a live-child state-lock probe on both platforms.
+PTY assertions reconstruct the visible terminal screen before checking text;
+raw escape sequences are retained for terminal-mode cleanup checks.
+Golden baselines remain implementation regression fixtures, not an independent
+visual oracle. `tests/update_goldens.py` updates them explicitly; review the
+gallery rather than accepting changed hashes blindly. This pass does not
+change the golden baselines.
 
-Native Windows Terminal, macOS/Linux GUI-terminal acceptance, strict release-dependency verification, end-to-end latency under load, and accessibility/flash auditing remain open. Large-document parsing is full-document, not incremental: the included 100,000-line probe took approximately **22 seconds** to generate its preview with approximately **191 MiB** process peak memory. File operations/recovery writes remain synchronous. Do not equate fast small-document composition with passing the full latency requirement.
+The 513-test/bootstrap-parser measurements in the original implementation
+report are retained as historical evidence. This pass installs and tests
+the declared release dependencies without weakening their bounds.
+
+Native Windows Terminal, macOS/Linux GUI-terminal acceptance, reference-machine
+end-to-end latency and accessibility/flash auditing remain open. Source edits
+still use a full-document Markdown parse in the background. Width/ASCII reflow
+reuses valid parsed Markdown, fragment navigation waits for matching preview
+work, and open-buffer search plus file/recovery publication run off the
+interactive input loop. The continuation records large-document measurements,
+including tail latency; compositor timing alone does not qualify physical
+terminal latency. Startup restoration, filesystem enumeration and some
+administrative file operations remain synchronous.
 
 Start with copies of valuable documents while evaluating this alpha. The exact delivered scope, remaining gaps, measurements and commands are in **`docs/IMPLEMENTATION_REPORT.md`**.
 

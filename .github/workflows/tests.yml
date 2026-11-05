@@ -1,0 +1,49 @@
+name: Tests and installed package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mdbm-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: '3.11'
+          - os: ubuntu-latest
+            python: '3.13'
+          - os: windows-latest
+            python: '3.13'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            pyproject.toml
+      - name: Install declared dependencies
+        run: python -m pip install -e ".[test]"
+      - name: Require the release Markdown parser
+        run: python -c "import mdbm; assert mdbm.HAVE_MDIT_PLUGINS, 'Release tests require mdit-py-plugins'"
+      - name: Full regression suite
+        run: python -m pytest -q
+      - name: Build wheel
+        run: python -m pip wheel --no-deps --wheel-dir wheelhouse .
+      - name: Exercise installed entry point and all themes
+        run: python tests/package_smoke.py wheelhouse

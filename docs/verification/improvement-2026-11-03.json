@@ -1,0 +1,43 @@
+{
+  "schema": "mdbm-improvement-verification/1.0",
+  "date": "2026-11-03",
+  "review_base": "a826b4f6d3803b8ec88542cc0a9c4bd9138607ed",
+  "tested_source_commit": "07bc7b94e987b0c5651b104635aeabf78e93665c",
+  "runtime_sha256": "877c88f9cee633c654cfeca08a80de831386941cb05241eecdf83ec523c8550a",
+  "python": "3.12.14",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.39",
+  "suite": {
+    "tests": 723,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "suite_seconds": 136.242,
+  "dependencies": {
+    "prompt-toolkit": "3.0.53",
+    "markdown-it-py": "4.2.0",
+    "mdit-py-plugins": "0.6.1",
+    "Pygments": "2.21.0",
+    "wcwidth": "0.9.4",
+    "Send2Trash": "2.1.0",
+    "regex": "2026.9.29",
+    "pytest": "9.2.0",
+    "pexpect": "4.9.0",
+    "pyte": "0.8.2"
+  },
+  "release_markdown_plugins": true,
+  "golden_baselines_changed": false,
+  "installed_wheel_checks": {
+    "target": "passed",
+    "prefix": "passed",
+    "theme_count": 27,
+    "snapshot_cells": [
+      80,
+      24
+    ],
+    "console_entry_point": "passed"
+  },
+  "independent_review": "No blocking introduced correctness or data-loss issue found; recovery write-failure injection retained original bundles.",
+  "remote_ci": "Run and exact source records are attached to the pull request; this file records local verification only.",
+  "physical_terminal_acceptance": "Not performed; remains a release gate."
+}

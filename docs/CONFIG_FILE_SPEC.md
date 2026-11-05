@@ -20,6 +20,15 @@ Precedence is built-in safe defaults → config → CLI → current-session chan
 
 Paths in application and appearance settings resolve relative to the config directory. The default config is alongside `mdbm.py`. An explicit startup file defines a workspace root from its parent; a startup directory is the root. `--theme` and `--safe-theme` override restored theme selection. `--no-restore` skips both session and recovery.
 
+Interactive appearance choices are validated dynamic session overrides, not
+rewrites of this file. The Appearance and accessibility panel previews motion,
+immersive art, colour depth, outer spacing, high contrast, reduced motion and
+ASCII display; Apply commits them and Cancel restores the prior values.
+Only committed preferences are persisted. `--no-restore` uses configuration
+defaults. Named workspace presets likewise live in session state, with up to
+eight custom layouts; temporary maximization retains the prior split layout
+for restoration and persistence. See [the UI contract](MDBM_TUI_UX_SPEC.md).
+
 Key syntax follows prompt_toolkit names, for example `c-s`, `f10`, `escape t`, `s-left`. Space separates a key chord sequence, not simultaneously held keys. The portable Alt representation is `escape <letter>`. Ctrl+P (palette), Ctrl+T (restore), Ctrl+Q (guarded quit), Escape, and F10 cannot be removed. Editing/navigation keys cannot be reassigned to actions which would strand dialogs. All commands remain discoverable through the host palette.
 
 Scripts are a basename allowlist, not globs, paths or commands. Even an allowlisted script needs a user activation and confirmation. Script arguments are entered as JSON, for example `["--count", "4", "a value containing spaces"]`.

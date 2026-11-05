@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdbm-workspace"
-version = "1.0.0a2"
+version = "1.0.0a4"
 description = "A protected cell-composited terminal Markdown workspace"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,7 +14,7 @@ dynamic = ["dependencies"]
 mdbm = "mdbm:main"
 
 [project.optional-dependencies]
-test = ["pytest>=8,<10", "pexpect>=4.9; sys_platform != 'win32'"]
+test = ["pytest>=8,<10", "pexpect>=4.9; sys_platform != 'win32'", "pyte>=0.8.2,<0.9; sys_platform != 'win32'"]
 
 [tool.setuptools]
 py-modules = ["mdbm"]

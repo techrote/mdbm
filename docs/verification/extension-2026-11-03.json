@@ -1,0 +1,107 @@
+{
+  "schema": "mdbm-extension-verification/1.0",
+  "version": "1.0.0a4",
+  "python": "3.12.14",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.39",
+  "review_base": "15a3e0b61bf008a6a5ea5e06abee1959ca7ae21a",
+  "design_source": "04568d38e832ed60dfcba8e8e991dc25d62cc8cb",
+  "full_local_suite": {
+    "local_commit": "7ba624936f55fa6d7479733dcfc5b4f0efdbdb09",
+    "source_sha256": "feebcc1d05c1eae4fc69cfedd868e167df6cb51465d5abd87dad94b9d11063a8",
+    "command": "python -m pytest -q --junitxml=/tmp/mdbm-a4-full.xml",
+    "tests": 878,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "time": 195.17
+  },
+  "final_inventory_followup": {
+    "local_commit": "f0fb357a5149b3c6fa609624dba47a93ae905aee",
+    "source_sha256": "fc16e5b2638cbaee25afc40524dd22c4697ecf9de843972ef0550b6e5c496b2a",
+    "delta": "Inventory rows distinguish UTF-8 text size from encoded legacy JSON archive size; five new regression cases.",
+    "command": "python -m pytest -q tests/test_recovery_inventory.py tests/test_recovery_background_lifecycle.py",
+    "tests": 22,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "time": 10.341
+  },
+  "wheel": {
+    "filename": "mdbm_workspace-1.0.0a4-py3-none-any.whl",
+    "sha256": "580821219af5d0e2dbcefd07cabae988ebb8fd2b68673d98f74734bba786b198",
+    "runtime_source_sha256": "feebcc1d05c1eae4fc69cfedd868e167df6cb51465d5abd87dad94b9d11063a8",
+    "install_schemes": [
+      "target",
+      "prefix"
+    ],
+    "packaged_themes": 28,
+    "console_entry_point": "passed",
+    "render_80x24": "passed"
+  },
+  "unchanged_golden_configurations": 96,
+  "local_posix_pty_tests": 10,
+  "performance_record": "responsiveness-2026-11-03.json",
+  "dependencies": {
+    "prompt-toolkit": "3.0.53",
+    "markdown-it-py": "4.2.0",
+    "mdit-py-plugins": "0.6.1",
+    "Pygments": "2.21.0",
+    "wcwidth": "0.9.4",
+    "regex": "2026.9.29",
+    "Send2Trash": "2.1.0",
+    "pytest": "9.2.0",
+    "pyte": "0.8.2"
+  },
+  "remote_verification": {
+    "run_id": 41561808862,
+    "url": "https://github.com/techrote/mdbm/actions/runs/41561808862",
+    "head": "d2e5f2abe9f354aab8c072632a1e91e1d3c6a577",
+    "tested_merge": "b102aae90b7635ccb1ad2b892dd63640147602f8",
+    "tree": "13bfbfb7ce6d67de509288c26127a8e3e846d70d",
+    "runtime_source_sha256": "fc16e5b2638cbaee25afc40524dd22c4697ecf9de843972ef0550b6e5c496b2a",
+    "conclusion": "success",
+    "matrix": [
+      {
+        "os": "Ubuntu",
+        "python": "3.11",
+        "passed": 883,
+        "skipped": 0,
+        "seconds": 220.96
+      },
+      {
+        "os": "Ubuntu",
+        "python": "3.13",
+        "passed": 883,
+        "skipped": 0,
+        "seconds": 262.04
+      },
+      {
+        "os": "Windows",
+        "python": "3.13",
+        "passed": 872,
+        "skipped": 11,
+        "seconds": 234.18
+      }
+    ],
+    "windows_skips": {
+      "posix_pty_cases": 10,
+      "symlink_creation_requiring_native_privileges": 1
+    },
+    "installed_wheel": {
+      "all_three_jobs": "passed",
+      "install_schemes": [
+        "target",
+        "prefix"
+      ],
+      "packaged_themes": 28,
+      "console_entry_point": "passed",
+      "render_80x24": "passed"
+    },
+    "qualification": "This run qualifies the unchanged runtime and test content. Later documentation-only revisions and their final checks are recorded on PR #8."
+  },
+  "limitations": [
+    "Physical terminal input-to-presentation timing is not measured by the compositor probe.",
+    "Source edits use the full Markdown parser; width/ASCII reflow reuses parsed Markdown.",
+    "Native terminal, accessibility and process-tree qualification remain separate release gates."
+  ]
+}
