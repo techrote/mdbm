@@ -11,6 +11,8 @@ from __future__ import annotations
 # =============================================================================
 import argparse
 import asyncio
+import base64
+import binascii
 import bisect
 import codecs
 import collections
@@ -26,6 +28,7 @@ import io
 import json
 import math
 import os
+import posixpath
 import re
 import signal
 import stat
@@ -33,10 +36,13 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 import tomllib
 import unicodedata
+import urllib.error
 import urllib.parse
+import urllib.request
 import uuid
 import webbrowser
 from array import array
@@ -1793,6 +1799,7 @@ class DocumentModel:
         self.undo_stack: collections.deque[EditDelta]=collections.deque()
         self.redo_stack: collections.deque[EditDelta]=collections.deque()
         self.undo_bytes=0; self.max_chars=16*1024*1024
+        self.readonly=False
         self.diagnostics: list[str]=[]
 
     def _hash(self) -> str:
@@ -1852,6 +1859,7 @@ class DocumentModel:
         return self.text[selection[0]:selection[1]] if selection else ''
 
     def _replace(self, start: int, end: int, inserted: str) -> None:
+        if self.readonly: raise MDBMError('GitHub document is read-only. Open a local file to edit.')
         if len(self.text)-(end-start)+len(inserted)>self.max_chars:
             raise MDBMError('Document edit exceeds the configured size budget.')
         self.text=self.text[:start]+inserted+self.text[end:]
@@ -1885,6 +1893,7 @@ class DocumentModel:
         self.replace_range(start,end,text)
 
     def undo(self) -> bool:
+        if self.readonly: raise MDBMError('GitHub document is read-only.')
         if not self.undo_stack: return False
         d=self.undo_stack.pop(); self.undo_bytes-=d.size
         self._replace(d.start,d.start+len(d.inserted),d.deleted)
@@ -1892,6 +1901,7 @@ class DocumentModel:
         return True
 
     def redo(self) -> bool:
+        if self.readonly: raise MDBMError('GitHub document is read-only.')
         if not self.redo_stack: return False
         d=self.redo_stack.pop()
         self._replace(d.start,d.start+len(d.deleted),d.inserted)
@@ -2314,6 +2324,7 @@ class OpenDocumentState:
     """Document-owned state kept independently while other documents are active."""
     id: str
     doc: DocumentModel
+    github: GitHubLocation | None = None
     memories: dict[Tile,TileMemory] = field(default_factory=lambda:{
         Tile.EDIT:TileMemory(), Tile.VIEW:TileMemory(), Tile.CONTENTS:TileMemory()})
     contents_collapsed: set[str] = field(default_factory=set)
@@ -2614,6 +2625,410 @@ def parse_and_layout(text: str, generation: int, width: int, ascii_only: bool) -
 # =============================================================================
 # 9. Safe link classification and explicitly allowlisted script execution
 # =============================================================================
+# =============================================================================
+# 8b. Bounded read-only public GitHub Markdown and directory transport
+# =============================================================================
+class GitHubError(ValueError):
+    """Safe, user-facing GitHub navigation or transport error."""
+
+
+OWNER = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\Z")
+REPO = re.compile(r"[A-Za-z0-9_.-]{1,100}\Z")
+MARKDOWN = (".md", ".markdown", ".mdown")
+CACHE_TTL = 10 * 60
+MAX_URL = 4096
+
+
+def _safe_segment(value: str) -> str:
+    if not value or value in (".", "..") or "\\" in value or "/" in value:
+        raise GitHubError("GitHub path contains an invalid segment.")
+    if any(ord(c) < 32 or ord(c) == 127 or c in "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069" for c in value):
+        raise GitHubError("GitHub path contains unsafe characters.")
+    return value
+
+
+def _path(value: str, *, encoded: bool = False) -> str:
+    if len(value) > MAX_URL:
+        raise GitHubError("GitHub path is too long.")
+    pieces = value.strip("/").split("/") if value.strip("/") else []
+    result = []
+    for piece in pieces:
+        try:
+            decoded = urllib.parse.unquote(piece, errors="strict") if encoded else piece
+        except UnicodeDecodeError:
+            raise GitHubError("GitHub path has invalid encoding.") from None
+        result.append(_safe_segment(decoded))
+    return "/".join(result)
+
+
+def _fragment(value: str) -> str:
+    try:
+        fragment = urllib.parse.unquote(value, errors="strict")
+    except UnicodeDecodeError:
+        raise GitHubError("Invalid GitHub heading fragment.") from None
+    if len(fragment) > 256 or any(ord(ch) < 32 or ord(ch) == 127 for ch in fragment):
+        raise GitHubError("Unsafe GitHub heading fragment.")
+    return fragment
+
+
+@dataclass(frozen=True, slots=True)
+class GitHubLocation:
+    owner: str
+    repo: str
+    ref: str = ""
+    path: str = ""
+    directory: bool = True
+    fragment: str = ""
+
+    @property
+    def url(self) -> str:
+        base = f"https://github.com/{self.owner}/{self.repo}"
+        if self.ref:
+            kind = "tree" if self.directory else "blob"
+            base += f"/{kind}/{urllib.parse.quote(self.ref, safe='/')}"
+            if self.path:
+                base += "/" + urllib.parse.quote(self.path, safe="/")
+        return base + ("#" + urllib.parse.quote(self.fragment, safe="-._~") if self.fragment else "")
+
+    @property
+    def key(self) -> tuple[str, str, str, str, bool]:
+        return (self.owner.casefold(), self.repo.casefold(), self.ref, self.path, self.directory)
+
+
+@dataclass(frozen=True, slots=True)
+class GitHubEntry:
+    path: str
+    directory: bool
+
+    @property
+    def name(self) -> str:
+        return self.path.rsplit("/", 1)[-1]
+
+
+def is_markdown(path: str) -> bool:
+    return path.casefold().endswith(MARKDOWN)
+
+
+def parse_github_url(value: str, current: GitHubLocation | None = None) -> GitHubLocation | None:
+    """Recognize GitHub repository/blob/tree and raw URLs, not arbitrary URLs."""
+    if not isinstance(value, str) or len(value) > MAX_URL:
+        raise GitHubError("GitHub URL exceeds the supported length.")
+    parsed = urllib.parse.urlsplit(value)
+    host = (parsed.hostname or "").lower()
+    if host not in ("github.com", "raw.githubusercontent.com"):
+        return None
+    if parsed.scheme != "https" or parsed.username or parsed.password or parsed.port not in (None, 443):
+        raise GitHubError("Only credential-free HTTPS GitHub URLs are supported.")
+    if parsed.query and parsed.query != "plain=1":
+        raise GitHubError("Unsupported GitHub URL query; use the canonical file URL.")
+    parts = _path(parsed.path, encoded=True).split("/")
+    if len(parts) < 2 or not OWNER.fullmatch(parts[0]) or not REPO.fullmatch(parts[1]) or parts[1] in (".", ".."):
+        raise GitHubError("Expected a GitHub owner and repository.")
+    owner, repo = parts[:2]
+    fragment = _fragment(parsed.fragment)
+    if host == "raw.githubusercontent.com":
+        if len(parts) < 4:
+            raise GitHubError("Raw GitHub URLs must identify a Markdown file.")
+        ref, path = parts[2], "/".join(parts[3:])
+        kind = "blob"
+    elif len(parts) == 2:
+        return GitHubLocation(owner, repo, "", "", True, fragment)
+    elif len(parts) >= 4 and parts[2] in ("blob", "tree", "raw"):
+        kind, ref = parts[2], parts[3]
+        path = "/".join(parts[4:])
+        if current is not None and (owner.casefold(), repo.casefold()) == (current.owner.casefold(), current.repo.casefold()):
+            # Once a branch is known, resolve links with slash-containing refs
+            # without treating their trailing components as directory names.
+            tail = "/".join(parts[3:])
+            if tail == current.ref or tail.startswith(current.ref + "/"):
+                ref, path = current.ref, tail[len(current.ref):].lstrip("/")
+    else:
+        return None
+    if not ref:
+        raise GitHubError("Missing GitHub branch or commit reference.")
+    directory = kind == "tree"
+    if not directory and not path:
+        raise GitHubError("GitHub file URL is missing its Markdown path.")
+    if not directory and not is_markdown(path):
+        raise GitHubError("Only GitHub Markdown files can be opened in MDBM.")
+    return GitHubLocation(owner, repo, ref, path, directory, fragment)
+
+
+def resolve_github_link(current: GitHubLocation, href: str) -> GitHubLocation | None:
+    """Follow links relative to the repository, never to the host filesystem."""
+    if not href or len(href) > MAX_URL:
+        raise GitHubError("Empty or excessively long Markdown link.")
+    parsed = urllib.parse.urlsplit(href)
+    if parsed.netloc and not parsed.scheme:
+        raise GitHubError("Protocol-relative URLs are not supported.")
+    if parsed.scheme:
+        return parse_github_url(href, current)
+    if parsed.query and parsed.query != "plain=1":
+        raise GitHubError("Remote Markdown file links do not support query strings.")
+    fragment = _fragment(parsed.fragment)
+    if not parsed.path:
+        return replace(current, fragment=fragment)
+    # GitHub's root-relative links are repository-relative; explicit GitHub
+    # /owner/repo/blob/... paths retain their GitHub web semantics.
+    if parsed.path.startswith("/"):
+        candidate = parsed.path.strip("/").split("/")
+        if len(candidate) >= 2 and candidate[0] == current.owner and candidate[1] == current.repo:
+            absolute = parse_github_url("https://github.com" + href, current)
+            if absolute is not None:
+                return absolute
+    relative = _path(parsed.path, encoded=True) if parsed.path.startswith("/") else None
+    if parsed.path.startswith("/"):
+        normalized = relative or ""
+    else:
+        raw = parsed.path.split("/")
+        decoded = []
+        for component in raw:
+            if component in ("", ".", ".."):
+                decoded.append(component)
+            else:
+                decoded.append(_path(component, encoded=True))
+        base = current.path if current.directory else posixpath.dirname(current.path)
+        normalized = posixpath.normpath(posixpath.join(base, "/".join(decoded)))
+        if normalized == ".":
+            normalized = ""
+    if normalized == ".." or normalized.startswith("../") or normalized.startswith("/"):
+        raise GitHubError("Markdown link escapes the GitHub repository root.")
+    normalized = _path(normalized)
+    directory = not normalized or parsed.path.endswith("/") or posixpath.basename(normalized) in (".", "..") or not posixpath.splitext(normalized)[1]
+    if not directory and not is_markdown(normalized):
+        raise GitHubError("Only Markdown documents and repository directories open inside MDBM.")
+    return replace(current, path=normalized, directory=directory, fragment=fragment)
+
+
+class GitHubCache:
+    """Bounded, key-checked memory plus optional private StateStore cache."""
+
+    def __init__(self, store: Any = None, max_bytes: int = 16 * 1024 * 1024):
+        self.store = store
+        self.max_bytes = max_bytes
+        self.memory: dict[str, dict[str, Any]] = {}
+        self.lock = threading.RLock()
+
+    @staticmethod
+    def _name(key: str) -> str:
+        return "gh-" + hashlib.sha256(key.encode("utf-8")).hexdigest() + ".json"
+
+    def get(self, key: str) -> dict[str, Any] | None:
+        with self.lock:
+            record = self.memory.get(key)
+            if record is None and self.store is not None:
+                record = self.store.read(self._name(key), self.max_bytes * 3 + 1024 * 1024)
+            if not isinstance(record, dict) or record.get("schema") != "mdbm-github-cache/1" or record.get("key") != key:
+                return None
+            timestamp = record.get("timestamp")
+            body = record.get("body")
+            if type(timestamp) not in (int, float) or not 0 < timestamp < time.time() + 3600:
+                return None
+            try:
+                encoded = json.dumps(body, ensure_ascii=True, sort_keys=True).encode("utf-8")
+            except (TypeError, ValueError):
+                return None
+            if len(encoded) > self.max_bytes * 3 or hashlib.sha256(encoded).hexdigest() != record.get("digest"):
+                return None
+            self.memory[key] = record
+            return record
+
+    def put(self, key: str, body: Any) -> None:
+        encoded = json.dumps(body, ensure_ascii=True, sort_keys=True).encode("utf-8")
+        if len(encoded) > self.max_bytes * 3:
+            return
+        record = {"schema": "mdbm-github-cache/1", "key": key, "timestamp": time.time(),
+                  "digest": hashlib.sha256(encoded).hexdigest(), "body": body}
+        with self.lock:
+            if len(self.memory) >= 128:
+                self.memory.pop(next(iter(self.memory)))
+            self.memory[key] = record
+            if self.store is not None and self.store.enabled and self.store.owns_lock:
+                # Caching is best-effort: failure cannot damage source documents.
+                try:
+                    self.store.write(self._name(key), record)
+                except (OSError, ValueError):
+                    pass
+
+
+class GitHubClient:
+    """Explicit public GitHub REST reads; injectable HTTP for deterministic tests."""
+
+    def __init__(self, store: Any = None, max_bytes: int = 16 * 1024 * 1024,
+                 timeout: float = 8):
+        self.cache = GitHubCache(store, max_bytes)
+        self.max_bytes = max_bytes
+        self.timeout = timeout
+
+    def _request_json(self, url: str, limit: int) -> Any:
+        parts = urllib.parse.urlsplit(url)
+        if parts.scheme != "https" or parts.hostname != "api.github.com":
+            raise GitHubError("GitHub API request was rejected.")
+        req = urllib.request.Request(url, headers={
+            "Accept": "application/vnd.github+json", "User-Agent": "mdbm-readonly/1.0",
+            "X-GitHub-Api-Version": "2022-11-28"})
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                raise GitHubError("GitHub API redirects are not followed.")
+        try:
+            with urllib.request.build_opener(NoRedirect()).open(req, timeout=self.timeout) as response:
+                if response.headers.get("Content-Length") and int(response.headers["Content-Length"]) > limit:
+                    raise GitHubError("GitHub response exceeds the size budget.")
+                raw = response.read(limit + 1)
+                if len(raw) > limit:
+                    raise GitHubError("GitHub response exceeds the size budget.")
+                return json.loads(raw.decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403, 429):
+                raise GitHubError("GitHub API unavailable or rate-limited (public read-only mode).") from None
+            if exc.code == 404:
+                raise GitHubError("GitHub repository, directory, ref or document not found.") from None
+            raise GitHubError(f"GitHub API returned HTTP {exc.code}.") from None
+        except (urllib.error.URLError, TimeoutError, UnicodeError, ValueError) as exc:
+            if isinstance(exc, GitHubError):
+                raise
+            raise GitHubError("Cannot read GitHub API; check the network or use a cached document.") from None
+
+    @staticmethod
+    def _api(loc: GitHubLocation, suffix: str = "") -> str:
+        return f"https://api.github.com/repos/{loc.owner}/{loc.repo}{suffix}"
+
+    def _get(self, key: str, refresh: bool, loader) -> tuple[Any, str]:
+        record = self.cache.get(key)
+        if record is not None and not refresh and time.time() - record["timestamp"] < CACHE_TTL:
+            return record["body"], "cache"
+        try:
+            body = loader()
+        except GitHubError:
+            if record is not None:
+                return record["body"], "stale cache"
+            raise
+        self.cache.put(key, body)
+        return body, "network"
+
+    def resolve(self, loc: GitHubLocation) -> GitHubLocation:
+        if loc.ref:
+            return loc
+        key = f"default:{loc.owner.casefold()}/{loc.repo.casefold()}"
+        body, _ = self._get(key, False, lambda: self._request_json(self._api(loc), 1024 * 1024))
+        if not isinstance(body, dict) or not isinstance(body.get("default_branch"), str):
+            raise GitHubError("GitHub did not provide the repository's default branch.")
+        return replace(loc, ref=_path(body["default_branch"]))
+
+    def document(self, loc: GitHubLocation, refresh: bool = False) -> tuple[str, str]:
+        loc = self.resolve(loc)
+        if loc.directory or not is_markdown(loc.path):
+            raise GitHubError("A GitHub Markdown file is required.")
+        key = f"doc:{loc.owner.casefold()}/{loc.repo.casefold()}@{loc.ref}/{loc.path}"
+        def download() -> str:
+            path = urllib.parse.quote(loc.path, safe="/")
+            query = urllib.parse.urlencode({"ref": loc.ref})
+            result = self._request_json(self._api(loc, "/contents/" + path) + "?" + query,
+                                        min(3 * self.max_bytes + 1048576, 32 * 1024 * 1024))
+            if not isinstance(result, dict) or result.get("type") != "file" or result.get("encoding") != "base64":
+                raise GitHubError("GitHub did not return readable Markdown file contents.")
+            if type(result.get("size")) is int and result["size"] > self.max_bytes:
+                raise GitHubError("GitHub Markdown file exceeds the configured size limit.")
+            content = result.get("content")
+            if not isinstance(content, str):
+                raise GitHubError("GitHub file has no readable content.")
+            try:
+                raw = base64.b64decode(content.replace("\n", ""), validate=True)
+                if len(raw) > self.max_bytes:
+                    raise GitHubError("GitHub Markdown file exceeds the configured size limit.")
+                return raw.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+            except (binascii.Error, UnicodeError):
+                raise GitHubError("GitHub Markdown file is not valid UTF-8/base64.") from None
+        text, source = self._get(key, refresh, download)
+        if not isinstance(text, str) or len(text.encode("utf-8")) > self.max_bytes:
+            raise GitHubError("Invalid cached GitHub document.")
+        return text, source
+
+    def cached_document(self, loc: GitHubLocation) -> str | None:
+        if loc.directory or not loc.ref:
+            return None
+        key = f"doc:{loc.owner.casefold()}/{loc.repo.casefold()}@{loc.ref}/{loc.path}"
+        cached = self.cache.get(key)
+        body = cached.get("body") if cached else None
+        return body if isinstance(body, str) and len(body.encode("utf-8")) <= self.max_bytes else None
+
+    def directory(self, loc: GitHubLocation, path: str = "", refresh: bool = False) -> tuple[tuple[GitHubEntry, ...], str]:
+        loc = self.resolve(loc)
+        path = _path(path)
+        key = f"dir:{loc.owner.casefold()}/{loc.repo.casefold()}@{loc.ref}/{path}"
+        def download():
+            endpoint = "/contents" + ("/" + urllib.parse.quote(path, safe="/") if path else "")
+            payload = self._request_json(self._api(loc, endpoint) + "?" + urllib.parse.urlencode({"ref": loc.ref}), 4 * 1024 * 1024)
+            if not isinstance(payload, list):
+                raise GitHubError("GitHub path is not a directory.")
+            output = []
+            for item in payload[:1000]:
+                if not isinstance(item, dict) or item.get("type") not in ("dir", "file"):
+                    continue
+                name = item.get("path")
+                if not isinstance(name, str):
+                    continue
+                try:
+                    normalized = _path(name)
+                except GitHubError:
+                    continue
+                if posixpath.dirname(normalized) != path:
+                    continue
+                directory = item["type"] == "dir"
+                if directory or is_markdown(normalized):
+                    output.append({"path": normalized, "directory": directory})
+            output.sort(key=lambda item: (not item["directory"], item["path"].casefold()))
+            return output
+        payload, source = self._get(key, refresh, download)
+        if not isinstance(payload, list) or len(payload) > 1000:
+            raise GitHubError("Invalid cached GitHub directory listing.")
+        rows = []
+        for item in payload:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str) or type(item.get("directory")) is not bool:
+                raise GitHubError("Invalid cached GitHub directory entry.")
+            normalized = _path(item["path"])
+            if posixpath.dirname(normalized) != path or (not item["directory"] and not is_markdown(normalized)):
+                raise GitHubError("Invalid cached GitHub directory entry.")
+            rows.append(GitHubEntry(normalized, item["directory"]))
+        return tuple(rows), source
+
+    def cached_directory(self, loc: GitHubLocation, path: str = "") -> tuple[GitHubEntry, ...] | None:
+        if not loc.ref:
+            return None
+        path = _path(path)
+        key = f"dir:{loc.owner.casefold()}/{loc.repo.casefold()}@{loc.ref}/{path}"
+        cached = self.cache.get(key)
+        if not cached or not isinstance(cached.get("body"), list):
+            return None
+        rows = []
+        for entry in cached["body"]:
+            if not isinstance(entry, dict) or not isinstance(entry.get("path"), str) or type(entry.get("directory")) is not bool:
+                return None
+            try:
+                normalized = _path(entry["path"])
+            except GitHubError:
+                return None
+            if posixpath.dirname(normalized) != path or (not entry["directory"] and not is_markdown(normalized)):
+                return None
+            rows.append(GitHubEntry(normalized, entry["directory"]))
+        return tuple(rows)
+
+
+def directory_markdown(loc: GitHubLocation, entries: tuple[GitHubEntry, ...]) -> str:
+    """Synthetic read-only index containing navigable relative Markdown links."""
+    title = f"{loc.owner}/{loc.repo} / {loc.path + '/' if loc.path else ''}"
+    lines = ["# " + title, "", f"GitHub branch `{loc.ref}` · read-only directory", ""]
+    if loc.path:
+        lines.append("- [Parent directory](../)")
+    for entry in entries:
+        name = entry.name.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+        target = urllib.parse.quote(entry.name, safe="-._~") + ("/" if entry.directory else "")
+        lines.append(f"- [{name + ('/' if entry.directory else '')}]({target})")
+    if not entries:
+        lines.append("(No Markdown documents or subdirectories.)")
+    return "\n".join(lines) + "\n"
+
+
 @dataclass(frozen=True, slots=True)
 class LinkTarget:
     kind: str
@@ -2926,6 +3341,9 @@ input does not portably distinguish Ctrl+Tab from Tab across supported hosts.
 
 Filesystem: Up/Down row; Left collapse/parent; Right expand;
 Enter open/toggle; F2 rename/move; Delete trash (confirmation); F5 refresh.
+GitHub: Ctrl+O accepts public HTTPS Markdown/repository URLs; links navigate
+inside GitHub, Filesystem browses repository Markdown and folders, F5 refreshes.
+GitHub documents remain READ ONLY; local editing is unaffected.
 Contents: Up/Down row, Left/Right hierarchy, Enter reveal source.
 View: Up/Down or Page keys scroll; Enter follows the selected preview link;
 N / P cycle links; the command palette also exposes link navigation.
@@ -2964,6 +3382,8 @@ class Workspace:
         except (OSError,PathError) as exc:
             self.diagnostics.append('Root fallback: '+display_text(exc)); self.files=SafeFiles(Path.cwd())
         self.files.protected_paths=(self.config.path('application','state_directory').absolute(),)
+        self.github=GitHubClient(self.store,self.files.max_bytes)
+        self.github_request_seq=0
         directories=[]
         for value in self.config.get('appearance','theme_directories'):
             p=Path(value).expanduser(); p=p if p.is_absolute() else self.config.base/p
@@ -3122,12 +3542,23 @@ class Workspace:
         used_ids:set[str]=set(); used_paths:set[str]=set()
         for record in records:
             if not isinstance(record,dict): continue
+            g_H: GitHubLocation | None = None
             ident=record.get('id')
             if not isinstance(ident,str) or not re.fullmatch(r'[0-9a-f]{32}',ident) or ident in used_ids:
                 ident=uuid.uuid4().hex
             path=record.get('path')
             try:
-                if path is None:
+                if path is None and isinstance(record.get('github'),str):
+                    g_H=parse_github_url(record['github'])
+                    if g_H is None or not g_H.ref: continue
+                    if g_H.directory:
+                        listing=self.github.cached_directory(g_H,g_H.path)
+                        source=directory_markdown(g_H,listing) if listing is not None else None
+                    else: source=self.github.cached_document(g_H)
+                    doc=DocumentModel(source if source is not None else
+                                      '# GitHub document not cached\n\nPress F5 to fetch this read-only document.\n')
+                    doc.readonly=True
+                elif path is None:
                     doc=DocumentModel()
                 elif isinstance(path,str) and len(path)<=4096:
                     target=self.files.resolve(path)
@@ -3136,18 +3567,20 @@ class Workspace:
                     used_paths.add(key)
                     doc=DocumentModel.loaded(self.files.load(target)) if target.exists() else DocumentModel('',target)
                 else: continue
-            except (OSError,PathError,ConflictError) as exc:
+            except (OSError,PathError,ConflictError,GitHubError) as exc:
                 self.diagnostics.append('Session document not opened: '+display_text(exc)); continue
             for key in ('cursor','anchor'):
                 value=record.get(key)
                 if type(value) is int: setattr(doc,key,max(0,min(len(doc.text),value)))
             state=self._make_document_state(doc,ident,record)
+            state.github=g_H
             self.documents.append(state); used_ids.add(state.id)
         active=saved.get('active_document')
         return active if isinstance(active,str) and self._state_by_id(active) else (self.documents[0].id if self.documents else None)
 
     def _document_session_record(self, state: OpenDocumentState) -> dict[str,Any]:
         return {'id':state.id,'path':str(state.doc.path) if state.doc.path else None,
+                'github':state.github.url if state.github else None,
                 'cursor':state.doc.cursor,'anchor':state.doc.anchor,
                 'memories':{t.value:{'scroll':state.memories[t].scroll,
                                      'scroll_x':state.memories[t].scroll_x,
@@ -3372,6 +3805,7 @@ class Workspace:
             self.parsed=state.parsed; self.preview=state.preview
         self.requested_parse=state.requested_parse
         self._selected_link=state.selected_link; self._view_links=list(state.view_links)
+        if hasattr(self,'tree_cache'): self.tree_cache=None
         if hasattr(self,'_dirty_known'): self._dirty_known=self.doc.dirty
         if emit:
             self.emit('file-activate'); self.invalidate()
@@ -3399,7 +3833,9 @@ class Workspace:
         untitled=0
         groups: dict[str,list[OpenDocumentState]]=collections.defaultdict(list)
         for state in self.documents:
-            if state.doc.path is None:
+            if state.github is not None:
+                labels[state.id]='GH:'+state.github.repo+'/'+(state.github.path or '/')
+            elif state.doc.path is None:
                 untitled+=1
                 labels[state.id]='Untitled' if untitled==1 else f'Untitled {untitled}'
             else:
@@ -3456,7 +3892,7 @@ class Workspace:
     def set_document(self, doc: DocumentModel, clear_recovery: bool = True) -> None:
         state=self._active_state()
         doc.generation=self.doc.generation+1; doc.max_chars=self.files.max_bytes
-        state.doc=doc
+        state.doc=doc; state.github=None
         state.memories={Tile.EDIT:TileMemory(),Tile.VIEW:TileMemory(),Tile.CONTENTS:TileMemory()}
         state.contents_collapsed=set(); state.parsed=None; state.preview=None
         state.requested_parse=None; state.selected_link=-1; state.view_links=[]
@@ -3471,6 +3907,122 @@ class Workspace:
         state=self._make_document_state(doc,document_id,record); self.documents.append(state)
         self._bind_document_state(state)
         return state
+
+
+    def open_target(self, value: str | Path) -> None:
+        """Open local paths or explicitly recognized public GitHub Markdown URLs."""
+        address=str(value).strip()
+        if not address: raise PathError('Enter a local Markdown path or GitHub URL.')
+        loc=parse_github_url(address)
+        if loc is not None:
+            self.open_github_location(loc)
+        elif '://' in address or address.startswith('//'):
+            raise PathError('Only public HTTPS GitHub Markdown URLs open inside MDBM.')
+        else:
+            self.open_path(address)
+
+    def open_github_location(self, loc: GitHubLocation, *, refresh: bool = False,
+                             focus_view: bool = True) -> None:
+        """Open or update a remote document; only worker threads perform network I/O."""
+        if loc.ref and not refresh:
+            existing=next((st for st in self.documents if st.github is not None
+                           and st.github.key==loc.key),None)
+            if existing is not None:
+                self.activate_document(existing.id)
+                if loc.fragment:
+                    if self.preview.generation!=self.doc.generation: self.parse_sync()
+                    self.jump_anchor(loc.fragment)
+                elif focus_view: self.set_layout('focus',Tile.VIEW)
+                self.status('GitHub read-only · already open · '+loc.repo+'/'+(loc.path or '/'))
+                return
+        self.github_request_seq+=1
+        sequence=self.github_request_seq
+
+        def fetch() -> tuple[GitHubLocation,str,str]:
+            resolved=self.github.resolve(loc)
+            if resolved.directory:
+                entries,source=self.github.directory(resolved,resolved.path,refresh)
+                text=directory_markdown(resolved,entries)
+            else:
+                text,source=self.github.document(resolved,refresh)
+            if resolved.path or not resolved.directory:
+                # Best effort: the Filesystem tile starts at the repository
+                # root, even when the entry point is a deep Markdown URL.
+                try: self.github.directory(resolved,'',refresh)
+                except GitHubError: pass
+            return resolved,text,source
+
+        def complete(resolved: GitHubLocation, text: str, source: str) -> None:
+            if sequence!=self.github_request_seq: return
+            existing=next((st for st in self.documents if st.github is not None
+                           and st.github.key==resolved.key),None)
+            if existing is not None:
+                if refresh:
+                    old=existing.doc
+                    doc=DocumentModel(text)
+                    doc.readonly=True
+                    doc.generation=old.generation+1
+                    doc.cursor=min(old.cursor,len(doc.text))
+                    existing.doc=doc; existing.parsed=None; existing.preview=None
+                    existing.requested_parse=None; existing.view_links=[]
+                    existing.selected_link=-1; existing.memories[Tile.VIEW].scroll=0
+                existing.github=replace(resolved,fragment='')
+                if existing.id==self.active_document_id: self._bind_document_state(existing)
+                else: self.activate_document(existing.id)
+            else:
+                doc=DocumentModel(text); doc.readonly=True
+                state=self._append_document(doc)
+                state.github=replace(resolved,fragment='')
+            self.tree_cache=None
+            if resolved.fragment:
+                if self.preview.generation!=self.doc.generation: self.parse_sync()
+                self.jump_anchor(resolved.fragment)
+            elif focus_view: self.set_layout('focus',Tile.VIEW)
+            label=resolved.owner+'/'+resolved.repo+'@'+resolved.ref+'/'+(resolved.path or '/')
+            self.status('GitHub READ ONLY · '+label+' · '+source)
+            self.invalidate()
+
+        if self.app is not None and self.app.is_running:
+            async def background() -> None:
+                try: result=await asyncio.to_thread(fetch)
+                except (GitHubError,OSError,ValueError) as exc:
+                    if sequence==self.github_request_seq:
+                        self.status('GitHub open failed: '+display_text(exc),True)
+                else: complete(*result)
+            self.status('Opening read-only GitHub Markdown…')
+            self.create_task(background())
+        else:
+            complete(*fetch())
+
+    def _tree_key(self, path: Path, github: GitHubLocation | None = None) -> str:
+        relative=str(path.relative_to(self.files.root)).replace('\\','/')
+        loc=github if github is not None else self._active_state().github
+        if loc is None: return relative
+        return 'github:'+loc.owner.casefold()+'/'+loc.repo.casefold()+'@'+loc.ref+':'+relative
+
+    def _load_github_directory(self, loc: GitHubLocation, relative: str,
+                               *, expand: bool = False, refresh: bool = False) -> None:
+        key=self._tree_key(self.files.root/relative,loc)
+        def read() -> None:
+            self.github.directory(loc,relative,refresh)
+        def complete() -> None:
+            active=self._active_state().github
+            if active is not None and (active.owner,active.repo,active.ref)==(loc.owner,loc.repo,loc.ref):
+                if expand: self.memories[Tile.FILESYSTEM].expanded.add(key)
+                self.tree_cache=None
+                self.invalidate()
+                self.status('GitHub directory '+(relative or '/')+' refreshed' if refresh
+                            else 'GitHub directory '+(relative or '/')+' opened')
+        if self.app is not None and self.app.is_running:
+            async def background() -> None:
+                try: await asyncio.to_thread(read)
+                except (GitHubError,OSError) as exc:
+                    self.status('GitHub directory failed: '+display_text(exc),True)
+                else: complete()
+            self.status('Loading GitHub directory…')
+            self.create_task(background())
+        else:
+            read(); complete()
 
     def open_path(self, path: str | Path, fragment: str = '',
                   *, allow_directory: bool = True, focus_edit: bool = True) -> None:
@@ -3552,6 +4104,8 @@ class Workspace:
 
     def save(self, as_new: bool = False, after: Callable[[],None] | None = None) -> None:
         state=self._active_state(); document_id=state.id; doc=state.doc
+        if state.github is not None or doc.readonly:
+            raise MDBMError('GitHub documents are read-only. Create a local copy explicitly to edit.')
         if as_new or doc.path is None:
             initial=str(doc.path.relative_to(self.files.root)) if doc.path else 'untitled.md'
             def accept(value: str) -> None:
@@ -3566,6 +4120,8 @@ class Workspace:
         state=self._state_by_id(document_id or self.active_document_id)
         if state is None: raise MDBMError('Document is no longer open.')
         doc=state.doc; other=self._state_by_path(path)
+        if doc.readonly or state.github is not None:
+            raise MDBMError('GitHub documents cannot be saved or overwritten.')
         if other is not None and other.id!=state.id:
             raise MDBMError('That destination is already open in another document.')
         try:
@@ -3627,6 +4183,21 @@ class Workspace:
     def tree_rows(self) -> list[tuple[Path,int,bool,bool]]:
         if self.tree_cache is not None: return self.tree_cache
         rows=[]; expanded=self.memories[Tile.FILESYSTEM].expanded
+        loc=self._active_state().github
+        if loc is not None:
+            def remote_visit(directory: str, depth: int) -> None:
+                if depth>32 or len(rows)>=20000: return
+                entries=self.github.cached_directory(loc,directory)
+                if entries is None: return
+                for entry in entries:
+                    path=self.files.root.joinpath(*entry.path.split('/'))
+                    rows.append((path,depth,entry.directory,False))
+                    if len(rows)>=20000: return
+                    if entry.directory and self._tree_key(path,loc) in expanded:
+                        remote_visit(entry.path,depth+1)
+            remote_visit('',0)
+            self.tree_cache=rows
+            return rows
         def visit(path: Path, depth: int) -> None:
             if depth>32 or len(rows)>=20000: return
             try: entries=self.files.entries(path)
@@ -3634,8 +4205,8 @@ class Workspace:
             for p,isdir,symlink in entries:
                 rows.append((p,depth,isdir,symlink))
                 if len(rows)>=20000: return
-                relative=str(p.relative_to(self.files.root))
-                if isdir and not symlink and relative in expanded: visit(p,depth+1)
+                key=self._tree_key(p)
+                if isdir and not symlink and key in expanded: visit(p,depth+1)
         visit(self.files.root,0); self.tree_cache=rows
         return rows
 
@@ -3651,12 +4222,21 @@ class Workspace:
         if row is not None: memory.row=max(0,min(len(rows)-1,row))
         p,depth,isdir,symlink=rows[max(0,min(len(rows)-1,memory.row))]
         if symlink: self.status('Symlink/junction targets are not opened.',True); return
+        loc=self._active_state().github
         if isdir:
-            key=str(p.relative_to(self.files.root))
+            key=self._tree_key(p)
+            if loc is not None and key not in memory.expanded:
+                relative=p.relative_to(self.files.root).as_posix()
+                if self.github.cached_directory(loc,relative) is None:
+                    self._load_github_directory(loc,relative,expand=True); return
             if key in memory.expanded: memory.expanded.remove(key)
             else: memory.expanded.add(key)
             self.tree_cache=None
-        elif not toggle_only: self.open_path(p)
+        elif not toggle_only:
+            if loc is not None:
+                relative=p.relative_to(self.files.root).as_posix()
+                self.open_github_location(replace(loc,path=relative,directory=False,fragment=''))
+            else: self.open_path(p)
 
     def contents_rows(self) -> list[Heading]:
         if self.parsed.generation!=self.doc.generation: return []
@@ -3692,6 +4272,13 @@ class Workspace:
     def activate_link(self, url: str) -> None:
         if self.preview.generation!=self.doc.generation:
             self.status('Preview is updating; link activation is temporarily held.'); return
+        state=self._active_state()
+        remote=resolve_github_link(state.github,url) if state.github is not None else parse_github_url(url)
+        if remote is not None:
+            if state.github is not None and remote.key==state.github.key:
+                if remote.fragment: self.jump_anchor(remote.fragment)
+                return
+            self.open_github_location(remote); return
         target=classify_link(url,self.files,self.doc.path)
         if target.kind=='heading': self.jump_anchor(target.value)
         elif target.kind=='local': self.open_path(target.value,target.fragment)
@@ -3734,7 +4321,8 @@ class Workspace:
     def _register_commands(self) -> None:
         r=self.registry
         r.add('file.new','New document',lambda p:self.new_document(),['c-n'],'File')
-        r.add('file.open','Open file…',lambda p:self.request_text('Open file','',self.open_path,'UTF-8 path relative to this workspace.'),['c-o'],'File')
+        r.add('file.open','Open file or GitHub URL…',lambda p:self.request_text('Open file / GitHub URL','',self.open_target,'Local path or HTTPS GitHub Markdown URL.'),['c-o'],'File')
+        r.add('file.open_github','Open GitHub Markdown URL…',lambda p:self.request_text('GitHub Markdown URL','',self.open_target,'Public repository, directory or .md file URL.'),[],'File')
         r.add('file.arm_drop','Arm next file-path paste',lambda p:self.arm_path_paste(),['f9'],'File')
         r.add('file.save','Save',lambda p:self.save(),['c-s'],'File')
         r.add('file.save_as','Save As…',lambda p:self.save(True),['f4'],'File')
@@ -3746,7 +4334,7 @@ class Workspace:
         r.add('document.previous','Previous document',lambda p:self.cycle_document(-1),[],'Navigate')
         r.add('document.activate','Activate document',lambda p:self.activate_document(str(p)),[],'Navigate','Tab strip click',False)
         r.add('file.root','Change workspace root…',lambda p:self.request_text('Workspace root',str(self.files.root),lambda v:self.change_root(Path(v).expanduser())),[],'File')
-        r.add('file.mkdir','New directory…',lambda p:self.request_text('New directory','new-folder',lambda v:(self.files.mkdir(v),self.refresh_tree())),[],'File')
+        r.add('file.mkdir','New directory…',lambda p:self.request_text('New directory','new-folder',lambda v:(self._require_local_tree(),self.files.mkdir(v),self.refresh_tree())),[],'File')
         r.add('file.rename','Rename / move selected item…',lambda p:self.rename_selected(),['f2'],'File')
         r.add('file.trash','Trash selected item…',lambda p:self.trash_selected(),[],'File')
         r.add('file.quit','Quit',lambda p:self.request_quit(),['c-q'],'File')
@@ -3779,7 +4367,9 @@ class Workspace:
         r.add('layout.widen_left','Widen left column',lambda p:self.adjust_split('left_ratio',.03),['escape ]'],'Tile')
         r.add('layout.shrink_view','Shrink View',lambda p:self.adjust_split('view_ratio',-.03),['escape -'],'Tile')
         r.add('layout.grow_view','Grow View',lambda p:self.adjust_split('view_ratio',.03),['escape ='],'Tile')
-        r.add('navigate.refresh','Refresh filesystem',lambda p:self.refresh_tree(),['f5'],'Navigate')
+        r.add('navigate.refresh','Refresh filesystem / GitHub document',lambda p:self.refresh_tree(),['f5'],'Navigate')
+        r.add('github.refresh','Refresh current GitHub document',lambda p:self.refresh_github(),[],'Navigate')
+        r.add('github.browse_root','Browse current GitHub repository',lambda p:self.browse_github_root(),[],'Navigate')
         r.add('navigate.contents_filter','Filter Contents…',lambda p:self.request_text('Filter Contents',self.memories[Tile.CONTENTS].filter,self.filter_contents),[],'Navigate')
         r.add('navigate.next_link','Select next preview link',lambda p:self.select_link(1),[],'Navigate')
         r.add('navigate.previous_link','Select previous preview link',lambda p:self.select_link(-1),[],'Navigate')
@@ -3840,6 +4430,7 @@ class Workspace:
         self.set_layout(axis,getattr(self.layout,axis)+amount); self.resize_commits+=1
 
     def copy_selection(self, cut: bool = False) -> None:
+        if cut and self.doc.readonly: raise MDBMError('GitHub documents are read-only.')
         text=self.doc.selected_text()
         if not text: self.status('No editor selection to copy.'); return
         self.clipboard=text
@@ -3861,6 +4452,7 @@ class Workspace:
         else: self.set_layout('focus',Tile.EDIT); self.ensure_caret_visible()
 
     def replace_dialog(self) -> None:
+        if self.doc.readonly: raise MDBMError('GitHub documents are read-only.')
         def have_needle(needle: str) -> None:
             if not needle: self.status('Find text must not be empty.',True); return
             self.search_term=needle
@@ -3908,7 +4500,7 @@ class Workspace:
             amount={'up':-1,'down':1,'pageup':-10,'pagedown':10,'home':-10**8,'top':-10**8,'end':10**8,'bottom':10**8}[direction]
             memory.row=max(0,min(len(rows)-1,memory.row+amount)); self.ensure_row_visible(tile,len(rows)); return
         if tile==Tile.FILESYSTEM:
-            p,depth,isdir,symlink=rows[memory.row]; key=str(p.relative_to(self.files.root))
+            p,depth,isdir,symlink=rows[memory.row]; key=self._tree_key(p)
             if direction=='right' and isdir and key not in memory.expanded: self.tree_activate(toggle_only=True)
             elif direction=='left':
                 if key in memory.expanded: memory.expanded.remove(key); self.tree_cache=None
@@ -3945,13 +4537,39 @@ class Workspace:
         elif self.layout.focus==Tile.EDIT: self.doc.delete()
 
     def refresh_tree(self) -> None:
-        self.tree_cache=None; self.invalidate()
+        state=self._active_state()
+        if state.github is None:
+            self.tree_cache=None; self.invalidate(); return
+        self.refresh_github()
+        if self.layout.focus==Tile.FILESYSTEM:
+            rows=self.tree_rows()
+            if rows:
+                selected=rows[min(len(rows)-1,self.memories[Tile.FILESYSTEM].row)]
+                if selected[2]:
+                    self._load_github_directory(state.github,
+                        selected[0].relative_to(self.files.root).as_posix(),refresh=True)
+
+    def refresh_github(self) -> None:
+        state=self._active_state()
+        if state.github is None:
+            self.status('Current document is local; use F5 to refresh its filesystem.',True); return
+        self.open_github_location(state.github,refresh=True)
+
+    def browse_github_root(self) -> None:
+        loc=self._active_state().github
+        if loc is None: raise MDBMError('Open a GitHub Markdown document first.')
+        self.open_github_location(replace(loc,path='',directory=True,fragment=''))
+
+    def _require_local_tree(self) -> None:
+        if self._active_state().github is not None:
+            raise MDBMError('GitHub repository tree is read-only; local filesystem changes are blocked.')
 
     def filter_contents(self, value: str) -> None:
         memory=self.memories[Tile.CONTENTS]; memory.filter=value; memory.row=memory.scroll=0
         self.set_layout('focus',Tile.CONTENTS)
 
     def rename_selected(self) -> None:
+        self._require_local_tree()
         src=self.selected_path()
         if src is None: self.status('No filesystem item selected.'); return
         initial=str(src.relative_to(self.files.root))
@@ -3971,6 +4589,7 @@ class Workspace:
         self.request_text('Rename / move',initial,perform,'Destination relative to workspace; existing targets are not overwritten.')
 
     def trash_selected(self) -> None:
+        self._require_local_tree()
         path=self.selected_path()
         if path is None: self.status('No filesystem item selected.'); return
         affected=[state.id for state in self.documents if state.doc.path is not None and
@@ -4082,7 +4701,7 @@ class Workspace:
             suffix='  '+command.keys[0] if command.keys else ''
             return MenuItem(label or command.label+suffix,cid)
         if name=='File':
-            return [item(cid) for cid in ('file.new','file.open','file.arm_drop','file.save','file.save_as','document.close','file.mkdir','file.rename','file.trash','file.root','file.quit')]
+            return [item(cid) for cid in ('file.new','file.open','file.open_github','file.arm_drop','file.save','file.save_as','document.close','file.mkdir','file.rename','file.trash','file.root','file.quit')]
         if name=='Edit':
             return [item(cid) for cid in ('edit.undo','edit.redo','edit.copy','edit.cut','edit.paste','edit.select_all','edit.find','edit.replace','edit.insert_tab','edit.profile')]
         if name=='Tile':
@@ -4091,7 +4710,7 @@ class Workspace:
                     MenuItem('Visibility',children=tuple(item(cid) for cid in ('tile.toggle_left','tile.toggle_right','tile.toggle_edit','tile.toggle_view'))),
                     MenuItem('Resize',children=tuple(item(cid) for cid in ('layout.narrow_left','layout.widen_left','layout.shrink_view','layout.grow_view'))),item('tile.restore')]
         if name=='Navigate':
-            return [item(cid) for cid in ('document.previous','document.next','edit.goto','edit.find_next','edit.find_previous','navigate.contents_filter','navigate.refresh','navigate.previous_link','navigate.next_link','navigate.follow_link')]
+            return [item(cid) for cid in ('document.previous','document.next','edit.goto','edit.find_next','edit.find_previous','navigate.contents_filter','navigate.refresh','github.refresh','github.browse_root','navigate.previous_link','navigate.next_link','navigate.follow_link')]
         if name=='Theme':
             return [item(cid) for cid in ('theme.choose','theme.minimal','theme.motion','theme.immersive','theme.high_contrast','theme.ascii')]
         if name=='Scripts':
@@ -4559,7 +5178,15 @@ class Workspace:
         return self.config.get('input','profile')=='vim' and self.vim_mode!='insert'
 
     def open_pasted_paths(self, payload: str) -> bool:
-        """Route recognized paste through canonical #1 open_path, never a shell."""
+        """Route recognized path/URL paste through guarded open, never a shell."""
+        candidate=payload.strip()
+        if '\n' not in candidate and ('github.com/' in candidate):
+            try:
+                loc=parse_github_url(candidate)
+                if loc is not None:
+                    self.open_github_location(loc); return True
+            except GitHubError as exc:
+                self.status('GitHub URL rejected: '+display_text(exc),True); return True
         paths=parse_terminal_paths(payload)
         if paths is None: return False
         opened=0; existing=0; rejected: list[tuple[str,str]]=[]
@@ -4611,7 +5238,7 @@ class Workspace:
         if paste and self.path_paste_armed:
             self.path_paste_armed=False
             if not self.open_pasted_paths(text):
-                self.status('No unambiguous local file paths · document unchanged',True)
+                self.status('No recognized local file path or GitHub URL · document unchanged',True)
             return
         if self.path_paste_armed:
             # Typing disarms without discarding normal editor/Vim input.
@@ -4627,6 +5254,13 @@ class Workspace:
                 for offset in range(1,len(rows)+1):
                     i=(memory.row+offset)%len(rows)
                     if rows[i][0].name.casefold().startswith(text.casefold()): memory.row=i; self.ensure_row_visible(Tile.FILESYSTEM,len(rows)); break
+            self.invalidate(); return
+        if self.doc.readonly:
+            if (self.config.get('input','profile')=='vim' and self.vim_mode!='insert'
+                    and not paste and len(text)==1 and text in 'hjklwb0$Gvyg:'):
+                self.vim_text(text)
+            else:
+                self.status('GitHub READ ONLY · editing disabled',True)
             self.invalidate(); return
         before=self.doc.generation
         if self.config.get('input','profile')=='vim' and self.vim_mode!='insert' and not paste:
@@ -4794,8 +5428,9 @@ class Workspace:
         y=canvas.height-1
         canvas.fill(Rect(0,y,canvas.width,1),HOST_CHROME,plane=100)
         position=f'{self.doc.row_of()+1}:{width_of(self.doc.line(self.doc.row_of())[:self.doc.cursor-self.doc.line_start(self.doc.row_of())],self.config.ascii,self.config.get("input","tab_size"))+1}'
-        mode=self.vim_mode.upper() if self.config.get('input','profile')=='vim' else 'EDIT'
-        name=self.doc.path.name if self.doc.path else '[untitled]'
+        mode='READ ONLY' if self.doc.readonly else self.vim_mode.upper() if self.config.get('input','profile')=='vim' else 'EDIT'
+        gh=self._active_state().github
+        name=gh.repo+'/'+(gh.path or '/') if gh is not None else self.doc.path.name if self.doc.path else '[untitled]'
         right=f' {"*" if self.doc.dirty else "="} {name} {position} {mode} '
         left=' '+self.notice
         if canvas.width<50: right=f' {"*" if self.doc.dirty else "="} {position} '
@@ -4838,7 +5473,7 @@ class Workspace:
                 buttons.append(('[x]','tile.hide',tile.value))
             total=sum(len(b[0]) for b in buttons)
             x=max(rect.x+1,rect.right-1-total)
-            title=' '+tile.value.title()+(' *' if tile==Tile.EDIT and self.doc.dirty else '')+' '
+            title=' '+tile.value.title()+(' [RO]' if tile==Tile.EDIT and self.doc.readonly else ' *' if tile==Tile.EDIT and self.doc.dirty else '')+' '
             canvas.text(rect.x+1,rect.y,title,HOST_FOCUS if focus else HOST_CHROME,100,
                         Rect(rect.x+1,rect.y,max(0,x-rect.x-1),1),self.config.ascii)
             for label,command,payload in buttons:
@@ -4891,7 +5526,8 @@ class Workspace:
         memory.row=max(0,min(memory.row,max(0,len(rows)-1)))
         memory.scroll=max(0,min(memory.scroll,max(0,len(rows)-1)))
         if not rows:
-            canvas.text(rect.x,rect.y,'(empty workspace)',styles['muted'],10,rect,self.config.ascii); return
+            label='(GitHub tree: F5 to load)' if self._active_state().github else '(empty workspace)'
+            canvas.text(rect.x,rect.y,label,styles['muted'],10,rect,self.config.ascii); return
         for offset in range(rect.h):
             i=memory.scroll+offset
             if i>=len(rows): break
@@ -4900,7 +5536,7 @@ class Workspace:
             ink=HOST_SELECTED if selected else styles['tree']
             if selected: canvas.fill(Rect(rect.x,y,rect.w,1),ink,plane=100)
             relative=str(path.relative_to(self.files.root)) if path!=self.files.root else '.'
-            expanded=relative in memory.expanded
+            expanded=self._tree_key(path) in memory.expanded
             marker=('v' if expanded else '>') if isdir else '! ' if unsafe else ' '
             label='  '*min(depth,20)+marker+' '+path.name+('/' if isdir else '')
             canvas.text(rect.x,y,label,ink,100 if selected else 10,rect,self.config.ascii)
@@ -5223,7 +5859,7 @@ def terminal_focus_protocol(app: Application, enabled: bool = True) -> Iterator[
 # =============================================================================
 def main(argv: Sequence[str] | None = None) -> int:
     parser=argparse.ArgumentParser(description='MDBM: a cell-native Markdown terminal workspace')
-    parser.add_argument('path',nargs='?',type=Path,help='Markdown file or workspace directory')
+    parser.add_argument('path',nargs='?',help='Local Markdown file/directory or public HTTPS GitHub URL')
     parser.add_argument('--config',type=Path,default=APP_DIR/'mdbm.conf' if (APP_DIR/'mdbm.conf').is_file() else Path.cwd()/'mdbm.conf')
     parser.add_argument('--theme',metavar='ID',help='Stable theme ID')
     parser.add_argument('--safe-theme',action='store_true',help='Use the embedded minimal theme')
@@ -5244,7 +5880,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f'VALID {theme.id} · md-editor-theme/1.1 · {len(theme.layers)} layers · SHA256 {theme.digest}')
             return 0
         headless=bool(args.diagnostics or args.snapshot)
-        workspace=Workspace(config,args.path,args.theme,args.safe_theme,not args.no_restore,persist=not headless)
+        target=args.path
+        remote=target if target and (target.startswith('https://') or target.startswith('http://')) else None
+        local=Path(target) if target and remote is None else None
+        workspace=Workspace(config,local,args.theme,args.safe_theme,not args.no_restore,persist=not headless)
+        if remote is not None: workspace.open_target(remote)
         if args.diagnostics:
             print(workspace.diagnostics_text()); return 0
         if args.snapshot:

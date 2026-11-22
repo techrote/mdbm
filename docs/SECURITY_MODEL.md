@@ -33,3 +33,10 @@ Configuration is trusted operational data, but it does not imply permission to r
 ## Failure policy
 
 A failed theme retains the last known-good compiled scene or falls back to embedded Minimal. A failed preview leaves editing usable. Failed saves retain dirty state and recovery. Failed trash operations retain the source. Invalid config values fall back individually; unrecognized keys produce diagnostics. Emergency palette, restore and exit bindings remain host-owned. No destructive default or silent overwrite is acceptable.
+
+
+## Public GitHub Markdown transport
+
+GitHub browsing is a separate, explicitly read-only source type; no remote URL becomes a local SafeFiles pathname. Only credential-free HTTPS URLs on `github.com` and `raw.githubusercontent.com` enter the native path. Requests use bounded, non-redirecting GitHub REST GETs exclusively to `api.github.com` with no token or cookie forwarding. API paths use validated repository owners, names, references, normalized repository-relative paths and encoded query parameters. Traversal, encoded separators, unsafe controls, non-Markdown file types and unsupported schemes are refused. Remote Markdown remains untrusted rendered text: HTML is literal, images are not fetched, links never execute scripts, and external browser navigation still needs confirmation.
+
+Remote document models reject all mutations. Workspace Save/Save As, mutation commands and remote-tree rename/trash/mkdir are explicitly blocked; paste and Vim edit paths are guarded in addition to the document-level check. Remote content is cached as key-checked, size-bounded, integrity-hashed private JSON in the existing state store, not under the local workspace tree. Explicit refresh may use stale cache on network failure; it never overwrites a local file. The cache and session restoration store public Markdown as local plaintext. The public GitHub API has rate limits and availability constraints; no authenticated GitHub reading or writing is provided by this implementation.
