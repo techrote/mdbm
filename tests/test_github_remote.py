@@ -203,7 +203,10 @@ def test_backend_cache_refresh_failure_and_size(monkeypatch):
     monkeypatch.setattr(offline,"_request_json",lambda *a: (_ for _ in ()).throw(m.GitHubError("offline")))
     assert offline.document(loc,refresh=True)==("# 2","stale cache")
     monkeypatch.setattr(client,"_request_json",lambda *a: file_data("x"*513))
-    with pytest.raises(m.GitHubError,match="size limit"): client.document(loc,refresh=True)
+    assert client.document(loc,refresh=True)==("# 2","stale cache")
+    fresh=m.GitHubClient(max_bytes=512)
+    monkeypatch.setattr(fresh,"_request_json",lambda *a: file_data("x"*513))
+    with pytest.raises(m.GitHubError,match="size limit"): fresh.document(loc,refresh=True)
 
 
 @pytest.mark.parametrize("url",[
