@@ -32,6 +32,24 @@ python3 -m venv .venv
 
 Subsequently, `./start.sh` launches the same environment. The extracted source bundle is the recommended installation. Editable installation is also supported: `python -m pip install -e .`. A wheel includes the reference themes under `share/mdbm`; when running an installed wheel, place `mdbm.conf` in your working directory or pass `--config`. Scripts in a wheel installation still follow the explicit sibling-of-`mdbm.py` policy; the extracted bundle is more convenient for that workflow.
 
+## GitHub Markdown browsing (public, read-only)
+
+MDBM can open Markdown files **directly from GitHub** without cloning a repository. The remote source stays separate from local files: GitHub documents are clearly labelled **READ ONLY**, and Save, Save As, editing, Cut, Replace, rename, trash and other write operations are blocked for remote content. Local tabs retain ordinary editing.
+
+```powershell
+# Any public GitHub Markdown document
+.venv\Scripts\python.exe mdbm.py "https://github.com/techrote/cybersand/blob/main/README.md"
+
+# Browse a public repository's folders and Markdown files
+.venv\Scripts\python.exe mdbm.py "https://github.com/techrote/cybersand"
+```
+
+During a session, use **Ctrl+O** or **File → Open GitHub Markdown URL** and enter a URL. The File menu also has a dedicated GitHub URL command. Markdown links to other Markdown files, relative directory paths and heading anchors open inside MDBM; other external web links continue to require browser confirmation. The left **Filesystem** tile switches to a lazy, expandable repository tree containing Markdown files and subdirectories. **Navigate → Browse current GitHub repository** opens its root index. **F5** refreshes the current GitHub document and repository root; a selected subdirectory can also be refreshed.
+
+A private application cache in the configured `.mdbm` state directory makes repeat opens faster and provides a stale/offline fallback. Cache freshness is ten minutes; F5 forces a network attempt, preserving available cached content when the GitHub API is unreachable. Session restore reopens cached remote tabs without network access. GitHub requests run on a background thread while the interactive UI is active, with timeouts and size limits.
+
+**Current limitations:** Public GitHub repositories only; HTTPS only; GitHub Contents API rate limits apply, and very large files that the Contents API does not return in Base64 cannot be opened. Only Markdown documents and directories open internally; binary files and scripts are not fetched or executed. Private repositories, credentials, commits/PR editing and GitHub write operations are intentionally **not implemented**. Ref names containing slashes are resolved correctly when already known within an open repository; ambiguous pasted GitHub URLs may require using an unambiguous ref.
+
 ## Using the workspace
 
 Filesystem occupies the left column; its **[T]** button switches to Contents without discarding tile memories. View starts above Edit. The right-hand **[S]** buttons swap their order; **[M]** opens a compact tile menu and **[x]** hides a tile. **[+T]**, the Tile menu and **Ctrl+T** restore hidden tiles. At small sizes the application shows one focused tile rather than crushing all four into unusable rectangles.
