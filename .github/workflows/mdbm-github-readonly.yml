@@ -1,0 +1,33 @@
+name: MDBM GitHub read-only regression
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mdbm-readonly-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Python 3.11 · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install MDBM and test dependencies
+        run: python -m pip install -e ".[test]"
+      - name: Compile source
+        run: python -m py_compile mdbm.py
+      - name: Run full regression suite
+        run: python -m pytest -q
